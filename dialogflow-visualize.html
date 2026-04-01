@@ -649,6 +649,19 @@ const COLORS = {
   global_fallback:{ fill:'#2a1515', stroke:'#ef4444', text:'#fca5a5', sub:'#f87171' },
   terminal:       { fill:'#0d2820', stroke:'#10b981', text:'#6ee7b7', sub:'#34d399' },
 };
+
+// Context-name → consistent color palette (hashed)
+const CTX_PALETTE = [
+  '#7c6aff','#0ea5e9','#10b981','#f59e0b','#ec4899',
+  '#8b5cf6','#14b8a6','#f97316','#06b6d4','#84cc16','#6366f1','#e879f9'
+];
+function ctxColorIdx(name) {
+  if (!name) return 0;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % CTX_PALETTE.length;
+}
+function ctxColor(name) { return CTX_PALETTE[ctxColorIdx(name)]; }
 const NODE_W = 190, NODE_H = 62;
 
 // ══════════════════════════════════════════════════════════════════════
@@ -833,16 +846,11 @@ function computeLayout() {
 function renderGraph() {
   svgEl.setAttribute('width',canvasW); svgEl.setAttribute('height',canvasH); svgEl.innerHTML='';
   const defs=mkS('defs');
-  defs.innerHTML=`
-    <marker id="arrM" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#7c6aff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="arrF" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="arrGF" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>`;
+  const markerHtml=(id,color)=>`<marker id="${id}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>`;
+  defs.innerHTML=
+    markerHtml('arrF','#f59e0b')+
+    markerHtml('arrGF','#ef4444')+
+    CTX_PALETTE.map((c,i)=>markerHtml(`arrCtx${i}`,c)).join('');
   svgEl.appendChild(defs);
   allEdges.forEach(drawEdge);
   allIntents.forEach(i=>drawNode(i));
@@ -856,16 +864,18 @@ function drawEdge(e) {
   const d=straight?`M${x1},${y1} L${x2},${y2}`:`M${x1},${y1} C${x1},${y1+30} ${x2},${y2-30} ${x2},${y2}`;
   const dest=allIntents.find(i=>i.id===e.to);
   const isGlobal=dest&&dest.type==='global_fallback';
-  const stroke=isGlobal?'#ef4444':e.dashed?'#f59e0b':'#7c6aff';
-  const mid=isGlobal?'arrGF':e.dashed?'arrF':'arrM';
+  let stroke, markerId;
+  if (isGlobal)       { stroke='#ef4444'; markerId='arrGF'; }
+  else if (e.dashed)  { stroke='#f59e0b'; markerId='arrF'; }
+  else                { const ci=ctxColorIdx(e.label||''); stroke=CTX_PALETTE[ci]; markerId=`arrCtx${ci}`; }
   const p=mkS('path'); p.setAttribute('d',d); p.setAttribute('fill','none'); p.setAttribute('stroke',stroke);
-  p.setAttribute('stroke-width','1.5'); p.setAttribute('stroke-opacity',e.dashed?'0.35':'0.45');
-  p.setAttribute('marker-end',`url(#${mid})`); if(e.dashed) p.setAttribute('stroke-dasharray','5 4');
+  p.setAttribute('stroke-width','1.5'); p.setAttribute('stroke-opacity',e.dashed?'0.3':'0.55');
+  p.setAttribute('marker-end',`url(#${markerId})`); if(e.dashed) p.setAttribute('stroke-dasharray','5 4');
   svgEl.appendChild(p);
   if(e.label&&!e.dashed&&!straight){
     const mx=(x1+x2)/2,my=(y1+y2)/2,lbl=e.label.length>20?e.label.slice(0,18)+'…':e.label,tw=lbl.length*5.4+10;
-    const bg=mkS('rect'); bg.setAttribute('x',mx-tw/2); bg.setAttribute('y',my-8); bg.setAttribute('width',tw); bg.setAttribute('height',14); bg.setAttribute('rx','3'); bg.setAttribute('fill','#0e0f11'); bg.setAttribute('opacity','0.85'); svgEl.appendChild(bg);
-    const t=mkS('text'); t.setAttribute('x',mx); t.setAttribute('y',my); t.setAttribute('text-anchor','middle'); t.setAttribute('dominant-baseline','central'); t.setAttribute('font-family',"'JetBrains Mono', monospace"); t.setAttribute('font-size','9'); t.setAttribute('fill','#555a70'); t.textContent=lbl; svgEl.appendChild(t);
+    const bg=mkS('rect'); bg.setAttribute('x',mx-tw/2); bg.setAttribute('y',my-8); bg.setAttribute('width',tw); bg.setAttribute('height',14); bg.setAttribute('rx','3'); bg.setAttribute('fill','#0e0f11'); bg.setAttribute('opacity','0.9'); svgEl.appendChild(bg);
+    const t=mkS('text'); t.setAttribute('x',mx); t.setAttribute('y',my); t.setAttribute('text-anchor','middle'); t.setAttribute('dominant-baseline','central'); t.setAttribute('font-family',"'JetBrains Mono', monospace"); t.setAttribute('font-size','9'); t.setAttribute('fill',stroke); t.textContent=lbl; svgEl.appendChild(t);
   }
 }
 
@@ -1268,7 +1278,7 @@ function matchIntent(userText){
 function respond(intent){
   if(!intent){botMsg("Sorry, I didn't understand that.",[],`nomatch`,null);return;}
   for(const oc of intent.outputContexts){activeContexts.add(oc.name);ctxLifespan[oc.name]=oc.lifespan;}
-  currentIntentId=intent.id;updateCtxBar();highlightNode(intent.id,true);
+  currentIntentId=intent.id;updateCtxBar();highlightNode(intent.id,false);
   let text=intent.responseText;
   if(intent.allSpeeches&&intent.allSpeeches.length>1)text=intent.allSpeeches[Math.floor(Math.random()*intent.allSpeeches.length)];
   botMsg(text||'(no response defined)',intent.quickReplies,intent.isFallback?'fallback':'matched',intent.name);
