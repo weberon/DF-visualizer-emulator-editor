@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dialogflow Flow Visualizer</title>
+<title>Dialogflow Visualizer · Editor</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap');
@@ -25,6 +25,7 @@
   --fallback-c: #f59e0b;
   --gfallback-c: #ef4444;
   --terminal-c: #10b981;
+  --edit-c: #f472b6;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -44,7 +45,24 @@ header {
   padding: 3px 10px; background: var(--surface2);
   border-radius: 6px; border: 1px solid var(--border);
   max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer; transition: border-color 0.15s;
 }
+#agent-name:hover { border-color: var(--border2); }
+#agent-name-input {
+  font-size: 11px; font-weight: 500; color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 10px; background: var(--surface2);
+  border-radius: 6px; border: 1px solid var(--accent);
+  width: 200px; outline: none; display: none;
+}
+.edit-mode-indicator {
+  font-size: 10px; font-family: 'JetBrains Mono', monospace;
+  padding: 2px 8px; border-radius: 99px;
+  background: rgba(244,114,182,0.15); color: var(--edit-c);
+  border: 1px solid rgba(244,114,182,0.3);
+  display: none;
+}
+.edit-mode-indicator.visible { display: inline-block; }
 .spacer { flex: 1; }
 .btn {
   font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600;
@@ -56,6 +74,9 @@ header {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { opacity: 0.9; }
 .btn.active-btn { background: rgba(124,106,255,0.2); border-color: var(--accent); color: var(--accent2); }
+.btn.edit-active { background: rgba(244,114,182,0.15); border-color: var(--edit-c); color: var(--edit-c); }
+.btn.danger { border-color: rgba(239,68,68,0.4); color: #f87171; }
+.btn.danger:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; color: #fca5a5; }
 .btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 #file-input { display: none; }
 
@@ -87,6 +108,7 @@ header {
   background-size: 100% 100%, 28px 28px, 28px 28px;
 }
 #canvas-wrap.dragging { cursor: grabbing; }
+#canvas-wrap.edit-cursor { cursor: cell; }
 #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 
 #drop-zone {
@@ -106,13 +128,10 @@ header {
 
 /* ── Side Panels ── */
 .side-panel {
-  width: 310px; flex-shrink: 0;
-  display: flex; flex-direction: column;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
+  width: 320px; flex-shrink: 0; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); background: var(--surface);
   position: absolute; right: 0; top: 0; bottom: 0; z-index: 20;
-  transform: translateX(100%);
-  transition: transform 0.22s ease;
+  transform: translateX(100%); transition: transform 0.22s ease;
 }
 .side-panel.open { transform: translateX(0); }
 .panel-head {
@@ -130,11 +149,13 @@ header {
 .tag-fallback      { background: rgba(245,158,11,0.15);  color: #fcd34d; }
 .tag-global_fallback { background: rgba(239,68,68,0.15); color: #fca5a5; }
 .tag-terminal      { background: rgba(16,185,129,0.15);  color: #6ee7b7; }
+.tag-editing       { background: rgba(244,114,182,0.15); color: var(--edit-c); }
 
 .panel-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .panel-body::-webkit-scrollbar { width: 4px; }
 .panel-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
+/* ── View Panel ── */
 .detail-section { display: flex; flex-direction: column; gap: 5px; }
 .detail-label {
   font-size: 10px; font-family: 'JetBrains Mono', monospace;
@@ -142,7 +163,6 @@ header {
 }
 .detail-value { font-size: 12px; color: var(--text); line-height: 1.55; }
 .detail-value.mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-
 .ctx-chip {
   display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px;
   padding: 1px 7px; border-radius: 99px; margin: 2px 2px;
@@ -150,7 +170,6 @@ header {
   border: 1px solid rgba(124,106,255,0.25);
 }
 .ctx-chip.out { background: rgba(16,185,129,0.1); color: #6ee7b7; border-color: rgba(16,185,129,0.25); }
-
 .phrase-list { display: flex; flex-direction: column; gap: 3px; }
 .phrase-item {
   font-size: 11px; color: var(--text2); font-family: 'JetBrains Mono', monospace;
@@ -166,7 +185,61 @@ header {
   background: var(--surface2); color: var(--text2);
 }
 
-/* Entities panel */
+/* ── Edit Form ── */
+.edit-field {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 7px; padding: 6px 9px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  color: var(--text); outline: none; resize: vertical;
+  transition: border-color 0.15s;
+}
+.edit-field:focus { border-color: var(--accent); }
+select.edit-field { cursor: pointer; resize: none; }
+textarea.edit-field { resize: vertical; line-height: 1.5; }
+
+.chip-editor {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 6px;
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 7px;
+  min-height: 34px; align-items: center; transition: border-color 0.15s;
+}
+.chip-editor:focus-within { border-color: var(--accent); }
+.chip-item {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 2px 4px 2px 8px; border-radius: 99px;
+  background: rgba(124,106,255,0.15); color: var(--accent2);
+  border: 1px solid rgba(124,106,255,0.3);
+}
+.chip-del {
+  background: none; border: none; color: var(--accent2); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 1px; opacity: 0.6;
+}
+.chip-del:hover { opacity: 1; }
+.chip-input {
+  background: none; border: none; outline: none;
+  color: var(--text); font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; min-width: 80px; flex: 1; padding: 1px 0;
+}
+.chip-input::placeholder { color: var(--text3); }
+
+.oc-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.oc-row .edit-field { padding: 4px 7px; font-size: 11px; }
+.oc-del {
+  background: none; border: 1px solid var(--border2); border-radius: 5px;
+  color: var(--text3); cursor: pointer; padding: 3px 7px; font-size: 11px;
+  flex-shrink: 0; transition: all 0.12s;
+}
+.oc-del:hover { color: #f87171; border-color: #ef4444; }
+
+.chip-add-row { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+.chip-add-row .edit-field { padding: 4px 7px; font-size: 11px; }
+
+.edit-actions {
+  display: flex; gap: 7px; align-items: center;
+  padding: 10px 0 2px; border-top: 1px solid var(--border); margin-top: 4px;
+}
+
+/* ── Entities panel ── */
 .entity-card {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;
@@ -187,62 +260,46 @@ header {
   background: var(--surface); flex-shrink: 0;
 }
 
-/* ── Floating Sim Widget ── */
+/* ── Floating Sim ── */
 #sim {
-  position: fixed;
-  left: 16px; bottom: 60px;
-  width: 330px;
+  position: fixed; left: 16px; bottom: 60px; width: 330px;
   display: none; flex-direction: column;
   background: var(--surface); border: 1px solid var(--border2);
   border-radius: 12px; overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-  z-index: 50;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 50;
 }
 #sim.open { display: flex; }
 #sim-head {
   display: flex; align-items: center; gap: 7px;
   padding: 9px 12px; border-bottom: 1px solid var(--border);
-  cursor: grab; user-select: none; flex-shrink: 0;
-  background: var(--surface2);
+  cursor: grab; user-select: none; flex-shrink: 0; background: var(--surface2);
 }
 #sim-head.grabbing { cursor: grabbing; }
 .sim-title { font-size: 12px; font-weight: 600; color: var(--text); flex: 1; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--terminal-c); flex-shrink: 0; }
 .status-dot.off { background: var(--text3); }
-
 #ctx-bar {
   padding: 5px 10px; border-bottom: 1px solid var(--border);
   display: flex; flex-wrap: wrap; gap: 4px; min-height: 28px; align-items: center;
   background: var(--bg); flex-shrink: 0;
 }
 .ctx-empty { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
-
-#messages {
-  height: 260px; overflow-y: auto; padding: 10px;
-  display: flex; flex-direction: column; gap: 8px;
-}
+#messages { height: 260px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 #messages::-webkit-scrollbar { width: 4px; }
 #messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
 .msg { display: flex; flex-direction: column; max-width: 88%; }
 .msg.user   { align-self: flex-end;   align-items: flex-end; }
 .msg.bot    { align-self: flex-start; align-items: flex-start; }
 .msg.system { align-self: center;     align-items: center; max-width: 100%; }
-
-.bubble {
-  padding: 7px 11px; border-radius: 12px; font-size: 12px;
-  line-height: 1.55; word-break: break-word;
-}
+.bubble { padding: 7px 11px; border-radius: 12px; font-size: 12px; line-height: 1.55; word-break: break-word; }
 .user .bubble   { background: #1e1a40; border: 1px solid rgba(124,106,255,0.3); color: var(--accent2); border-bottom-right-radius: 4px; }
 .bot  .bubble   { background: #1e2128; border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
 .system .bubble { background: transparent; color: var(--text3); font-size: 10px; font-family: 'JetBrains Mono', monospace; border: none; padding: 2px 0; }
-
 .msg-meta { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-top: 3px; padding: 0 3px; }
 .itag { display: inline-block; font-size: 10px; font-family: 'JetBrains Mono', monospace; padding: 1px 7px; border-radius: 4px; }
 .itag.matched  { background: rgba(124,106,255,0.15); color: var(--accent2); }
 .itag.fallback { background: rgba(245,158,11,0.15);  color: #fbbf24; }
 .itag.nomatch  { background: rgba(239,68,68,0.12);   color: #f87171; }
-
 .qr-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .qr-btn {
   font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 500;
@@ -250,11 +307,7 @@ header {
   background: var(--surface2); color: var(--text2); cursor: pointer; transition: all 0.12s;
 }
 .qr-btn:hover { background: rgba(124,106,255,0.15); border-color: var(--accent); color: var(--accent2); }
-
-.chat-input-wrap {
-  padding: 8px 10px; border-top: 1px solid var(--border);
-  display: flex; gap: 6px; flex-shrink: 0; align-items: flex-end;
-}
+.chat-input-wrap { padding: 8px 10px; border-top: 1px solid var(--border); display: flex; gap: 6px; flex-shrink: 0; align-items: flex-end; }
 #chat-input {
   flex: 1; background: var(--surface2); border: 1px solid var(--border2); border-radius: 9px;
   padding: 7px 10px; font-family: 'Syne', sans-serif; font-size: 12px; color: var(--text);
@@ -283,7 +336,8 @@ header {
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 24px 64px rgba(0,0,0,0.55);
 }
-.modal-box.sm { width: min(580px, 94vw); }
+.modal-box.sm  { width: min(580px, 94vw); }
+.modal-box.med { width: min(520px, 94vw); }
 .modal-head {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -310,16 +364,17 @@ header {
 .help-section h3 { font-size: 12px; font-weight: 700; color: var(--accent2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
 .help-section p, .help-section li { font-size: 12px; color: var(--text2); line-height: 1.65; }
 .help-section ul, .help-section ol { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.help-section code {
-  font-family: 'JetBrains Mono', monospace; font-size: 11px;
-  background: var(--surface2); padding: 1px 5px; border-radius: 3px; color: var(--accent2);
-}
+.help-section code { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--surface2); padding: 1px 5px; border-radius: 3px; color: var(--accent2); }
 .caveat-list { display: flex; flex-direction: column; gap: 4px; }
-.caveat {
-  font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace;
-  padding: 4px 8px; background: var(--surface2); border-radius: 4px;
-  border-left: 2px solid var(--border2);
-}
+.caveat { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; padding: 4px 8px; background: var(--surface2); border-radius: 4px; border-left: 2px solid var(--border2); }
+
+/* New Intent modal */
+.ni-body { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.ni-body::-webkit-scrollbar { width: 4px; }
+.ni-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.ni-row { display: flex; flex-direction: column; gap: 5px; }
+.ni-label { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; }
+.ni-label .req { color: #f87171; margin-left: 2px; }
 
 /* ── Animations ── */
 @keyframes pulse-ring {
@@ -335,9 +390,12 @@ header {
 <body>
 
 <header>
-  <div class="logo">df<span>/</span>viz</div>
-  <div id="agent-name">no agent loaded</div>
+  <div class="logo">df<span>/</span>viz <span style="font-size:10px;opacity:0.4">editor</span></div>
+  <div id="agent-name" title="Click to rename in edit mode" onclick="startRenameAgent()">no agent loaded</div>
+  <input id="agent-name-input" onblur="finishRenameAgent()" onkeydown="if(event.key==='Enter')finishRenameAgent()">
+  <div class="edit-mode-indicator" id="edit-indicator">✏ EDIT MODE</div>
   <div class="spacer"></div>
+  <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()" disabled>✏ Edit</button>
   <button class="btn primary" onclick="document.getElementById('file-input').click()">↑ Load Agent</button>
   <input type="file" id="file-input" accept=".zip" onchange="handleFile(this.files[0])">
 </header>
@@ -348,6 +406,9 @@ header {
     <button class="btn" onclick="zoomBy(0.83)" title="Zoom out">−</button>
     <button class="btn" onclick="fitView()" title="Fit graph to view">⊞ Fit</button>
   </div>
+  <div class="tb-sep"></div>
+  <button class="btn" id="new-intent-btn" onclick="openNewIntentModal()" style="display:none">＋ Intent</button>
+  <button class="btn" id="export-zip-btn" onclick="exportZip()" disabled>↓ Export ZIP</button>
   <div class="tb-sep"></div>
   <button class="btn" id="toggle-sim-btn" onclick="toggleChat()">💬 Simulate</button>
   <button class="btn" id="toggle-entities-btn" onclick="toggleEntities()" disabled>📋 Entities</button>
@@ -371,7 +432,7 @@ header {
         <div class="drop-icon">📂</div>
         <div class="drop-title">Drop your Dialogflow ZIP here</div>
         <div class="drop-sub">or click "Load Agent" above</div>
-        <div class="drop-sub" style="margin-top:4px">Supports Dialogflow ES agent exports</div>
+        <div class="drop-sub" style="margin-top:4px">or use ✏ Edit → ＋ Intent to build from scratch</div>
       </div>
     </div>
     <div id="stats-bar">
@@ -383,10 +444,10 @@ header {
     </div>
   </div>
 
-  <!-- Intent Detail Panel -->
+  <!-- Intent Detail / Edit Panel -->
   <div class="side-panel" id="panel-detail">
     <div class="panel-head">
-      <span class="panel-title">Intent Detail</span>
+      <span class="panel-title" id="panel-detail-title">Intent Detail</span>
       <span class="panel-tag" id="detail-tag"></span>
       <button class="btn" style="padding:3px 8px;font-size:11px" onclick="closeDetail()">✕</button>
     </div>
@@ -403,14 +464,14 @@ header {
   </div>
 </div>
 
-<div id="status-bar">ready — drop a Dialogflow ZIP to begin</div>
+<div id="status-bar">ready — load a Dialogflow ZIP, or click ✏ Edit then ＋ Intent to build from scratch</div>
 
 <!-- Floating Chat Simulator -->
 <div id="sim">
   <div id="sim-head">
     <div class="status-dot off" id="chat-dot"></div>
     <div class="sim-title">Chat Simulator</div>
-    <button class="btn" onclick="resetChat()" style="font-size:10px;padding:2px 8px" title="Reset conversation">↺</button>
+    <button class="btn" onclick="resetChat()" style="font-size:10px;padding:2px 8px" title="Reset">↺</button>
     <button class="btn" onclick="toggleChat()" style="font-size:10px;padding:2px 8px" title="Close">✕</button>
   </div>
   <div id="ctx-bar"><span class="ctx-empty">no active contexts</span></div>
@@ -452,43 +513,112 @@ header {
         <ol>
           <li>Open your agent in the Dialogflow console</li>
           <li>Go to <strong>Settings → Export and Import</strong></li>
-          <li>Click <strong>Export as ZIP</strong></li>
-          <li>Drop the downloaded <code>.zip</code> onto this tool or click <strong>Load Agent</strong></li>
+          <li>Click <strong>Export as ZIP</strong> and download</li>
+          <li>Drop the <code>.zip</code> here or click <strong>Load Agent</strong></li>
         </ol>
       </div>
       <div class="help-section">
-        <h3>Using the Visualizer</h3>
+        <h3>Editing &amp; Creating Flows</h3>
         <ul>
-          <li><strong>Click a node</strong> to open the Intent Detail panel — shows response, contexts, parameters, and training phrases</li>
-          <li><strong>Scroll</strong> to zoom; <strong>drag</strong> the background to pan; <strong>Fit</strong> resets the viewport</li>
-          <li><strong>Entities</strong> panel lists all custom entity definitions parsed from the ZIP</li>
-          <li><strong>Simulate</strong> opens a draggable chat widget to test the conversation flow</li>
-          <li><strong>XState</strong> exports the agent as an XState v5 machine definition</li>
+          <li>Click <strong>✏ Edit</strong> to enter edit mode</li>
+          <li>Click any node to open its <strong>edit form</strong> — modify response, contexts, training phrases, and quick replies</li>
+          <li>Click <strong>＋ Intent</strong> to create a brand-new intent — connect it by sharing context names with existing intents</li>
+          <li><strong>Connections are made through contexts</strong>: intent A sets output context <code>ctx_foo</code>, intent B lists <code>ctx_foo</code> as input → an arrow appears</li>
+          <li>Click <strong>↓ Export ZIP</strong> to download a Dialogflow-importable ZIP</li>
+          <li>In Dialogflow: <strong>Settings → Export and Import → Import from ZIP</strong></li>
+          <li>Click the <strong>agent name pill</strong> (top left) to rename in edit mode</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h3>Visualizer Controls</h3>
+        <ul>
+          <li><strong>Click a node</strong> — view or edit intent details in the right panel</li>
+          <li><strong>Scroll</strong> to zoom · <strong>drag</strong> background to pan · <strong>Fit</strong> resets viewport</li>
+          <li><strong>Entities</strong> panel lists custom entity definitions from the ZIP</li>
+          <li><strong>Simulate</strong> opens a draggable chat widget to test the flow live</li>
         </ul>
       </div>
       <div class="help-section">
         <h3>Node Types</h3>
         <ul>
-          <li>🏠 <span style="color:#93c5fd">Entry</span> — welcome / WELCOME event intent</li>
-          <li>📋 <span style="color:#7dd3fc">Data</span> — intent that collects parameters (slot-filling)</li>
+          <li>🏠 <span style="color:#93c5fd">Entry</span> — WELCOME event / conversation start</li>
+          <li>📋 <span style="color:#7dd3fc">Data</span> — collects parameters (slot-filling)</li>
           <li>❓ <span style="color:#c4bbff">Intent</span> — standard conversational turn</li>
           <li>⚠️ <span style="color:#fcd34d">Fallback</span> — context-scoped fallback handler</li>
-          <li>🚫 <span style="color:#fca5a5">Global Fallback</span> — catches any unmatched input globally</li>
-          <li>✅ <span style="color:#6ee7b7">Terminal</span> — end-of-conversation intent</li>
+          <li>🚫 <span style="color:#fca5a5">Global Fallback</span> — catches any unmatched input</li>
+          <li>✅ <span style="color:#6ee7b7">Terminal</span> — end of conversation</li>
         </ul>
       </div>
       <div class="help-section">
         <h3>Caveats</h3>
         <div class="caveat-list">
-          <div class="caveat">NLU is approximate — uses keyword/phrase matching, not ML classification</div>
-          <div class="caveat">Webhook fulfillment responses are not executed</div>
-          <div class="caveat">Slot filling and required parameters are not enforced in simulation</div>
-          <div class="caveat">Conditional responses are not evaluated</div>
+          <div class="caveat">NLU is approximate — keyword/phrase matching, not ML</div>
+          <div class="caveat">Webhook fulfillment is not executed in simulation</div>
+          <div class="caveat">Only English training phrases exported (_usersays_en.json)</div>
           <div class="caveat">Only Dialogflow ES is supported — not CX</div>
-          <div class="caveat">Only English training phrases are parsed (_usersays_en.json)</div>
           <div class="caveat">All processing is local — no data leaves your browser</div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Intent Modal -->
+<div class="modal-overlay" id="modal-new-intent" onclick="if(event.target===this)closeNewIntentModal()">
+  <div class="modal-box med">
+    <div class="modal-head">
+      <div class="modal-title">＋ New Intent</div>
+      <button class="btn" onclick="closeNewIntentModal()">✕ Cancel</button>
+    </div>
+    <div class="ni-body">
+      <div class="ni-row">
+        <div class="ni-label">Intent Name <span class="req">*</span></div>
+        <input class="edit-field" id="ni-name" placeholder="e.g. ans_confirm_address" style="resize:none">
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Type</div>
+        <select class="edit-field" id="ni-type">
+          <option value="main">intent (standard)</option>
+          <option value="entry">entry (welcome)</option>
+          <option value="data">data (collects parameters)</option>
+          <option value="fallback">fallback (context-scoped)</option>
+          <option value="global_fallback">global fallback</option>
+          <option value="terminal">terminal (end of flow)</option>
+        </select>
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Bot Response</div>
+        <textarea class="edit-field" id="ni-response" rows="2" placeholder="What the bot says when this intent fires…"></textarea>
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Quick Replies</div>
+        <div class="chip-editor" id="ni-ce-qr">
+          <input class="chip-input" placeholder="Type a reply, press Enter…" onkeydown="chipKeydown(event,'ni-ce-qr')">
+        </div>
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Input Contexts <span style="color:var(--text3);font-size:9px;text-transform:none">(must be active for this intent to fire)</span></div>
+        <div class="chip-editor" id="ni-ce-ic">
+          <input class="chip-input" placeholder="context-name, press Enter…" onkeydown="chipKeydown(event,'ni-ce-ic')">
+        </div>
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Output Contexts <span style="color:var(--text3);font-size:9px;text-transform:none">(activated after this intent fires)</span></div>
+        <div id="ni-oc-list"></div>
+        <div class="chip-add-row">
+          <input class="edit-field" id="ni-oc-name" placeholder="context-name" style="flex:1">
+          <input class="edit-field" id="ni-oc-life" type="number" value="5" min="1" max="99" style="width:56px" title="Lifespan (turns)">
+          <button class="btn" style="padding:4px 9px;font-size:12px" onclick="niAddOcRow()">＋</button>
+        </div>
+      </div>
+      <div class="ni-row">
+        <div class="ni-label">Training Phrases <span style="color:var(--text3);font-size:9px;text-transform:none">(one per line)</span></div>
+        <textarea class="edit-field" id="ni-phrases" rows="4" placeholder="yes&#10;that's correct&#10;sounds good"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="modal-note">Intent appears on graph immediately. Connect via shared context names.</span>
+      <button class="btn primary" onclick="createIntentFromModal()">Create Intent</button>
     </div>
   </div>
 </div>
@@ -500,15 +630,13 @@ header {
 let allIntents = [], allEdges = [], positions = {}, allEntities = [];
 let canvasW = 800, canvasH = 600;
 let scale = 1, panX = 0, panY = 0;
-let isDragging = false, dragX, dragY, panX0, panY0;
-let mouseMoved = false;
+let isDragging = false, dragX, dragY, panX0, panY0, mouseMoved = false;
 let selectedNodeId = null;
+let editMode = false;
+let editDraft = null;
 
 // Chat state
-let activeContexts = new Set();
-let ctxLifespan    = {};
-let currentIntentId = null;
-let convEnded = false;
+let activeContexts = new Set(), ctxLifespan = {}, currentIntentId = null, convEnded = false;
 
 const svgEl = document.getElementById('canvas');
 const wrap  = document.getElementById('canvas-wrap');
@@ -533,80 +661,58 @@ async function handleFile(file) {
     const zip = await JSZip.loadAsync(file);
     const result = await parseDialogflow(zip, file.name);
     if (!result.intents.length) { setStatus('No intents found in this ZIP.'); return; }
-
     allIntents  = result.intents;
     allEntities = result.entities;
-    buildEdges();
-    computeLayout();
-    renderGraph();
-
+    buildEdges(); computeLayout(); renderGraph();
     document.getElementById('agent-name').textContent = result.agentName;
     document.getElementById('drop-zone').classList.add('hidden');
-    updateStats();
-    resetChat();
+    updateStats(); resetChat();
     document.getElementById('chat-input').disabled = false;
     document.getElementById('send-btn').disabled   = false;
     document.getElementById('chat-dot').classList.remove('off');
-    document.getElementById('xstate-btn').disabled = false;
+    document.getElementById('xstate-btn').disabled      = false;
+    document.getElementById('export-zip-btn').disabled  = false;
+    document.getElementById('edit-mode-btn').disabled   = false;
     document.getElementById('toggle-entities-btn').disabled = allEntities.length === 0;
     buildEntitiesPanel();
     closeDetail(); closeEntities();
-
     setStatus(`Loaded ${allIntents.length} intents · ${allEdges.length} transitions · ${allEntities.length} entities — ${result.agentName}`);
-  } catch(e) {
-    setStatus('Parse error: ' + e.message);
-    console.error(e);
-  }
+  } catch(e) { setStatus('Parse error: ' + e.message); console.error(e); }
 }
 
 async function parseDialogflow(zip, filename) {
-  const intentFiles = {}, userSaysMap = {};
-  const entityDefFiles = {}, entityEntryMap = {};
+  const intentFiles = {}, userSaysMap = {}, entityDefFiles = {}, entityEntryMap = {};
   let agentName = filename.replace(/\.zip$/i, '');
 
   for (const [path, f] of Object.entries(zip.files)) {
     if (f.dir) continue;
-    const segs  = path.replace(/\\/g, '/').split('/');
+    const segs = path.replace(/\\/g, '/').split('/');
     const fname = segs[segs.length - 1];
     if (!fname.endsWith('.json')) continue;
-
     const text = await f.async('text');
     let json; try { json = JSON.parse(text); } catch(e) { continue; }
 
-    // agent.json
-    if (fname === 'agent.json' && segs.length <= 2) {
-      if (json.displayName) agentName = json.displayName;
-      continue;
-    }
+    if (fname === 'agent.json' && segs.length <= 2) { if (json.displayName) agentName = json.displayName; continue; }
 
-    // intent files
     if (segs.some(s => s === 'intents')) {
       if (fname.match(/_usersays_en\.json$/)) {
         const key = fname.replace(/_usersays_en\.json$/, '');
         userSaysMap[key] = (userSaysMap[key] || []).concat(Array.isArray(json) ? json : [json]);
-      } else if (!fname.match(/_usersays_\w+\.json$/)) {
-        intentFiles[fname] = json;
-      }
+      } else if (!fname.match(/_usersays_\w+\.json$/)) { intentFiles[fname] = json; }
       continue;
     }
-
-    // entity files
     if (segs.some(s => s === 'entities')) {
-      if (fname.match(/_entries_en\.json$/)) {
-        const key = fname.replace(/_entries_en\.json$/, '');
-        entityEntryMap[key] = Array.isArray(json) ? json : [];
-      } else if (!fname.match(/_entries_\w+\.json$/)) {
+      if (fname.match(/_entries_en\.json$/))
+        entityEntryMap[fname.replace(/_entries_en\.json$/, '')] = Array.isArray(json) ? json : [];
+      else if (!fname.match(/_entries_\w+\.json$/))
         entityDefFiles[fname.replace(/\.json$/, '')] = json;
-      }
     }
   }
 
-  // Build intents
   const intents = Object.entries(intentFiles).map(([fname, data]) => {
     const baseName = fname.replace(/\.json$/, '');
-    const resp0    = (data.responses || [])[0] || {};
+    const resp0 = (data.responses || [])[0] || {};
     const messages = resp0.messages || [];
-
     let responseText = '', quickReplies = [], allSpeeches = [];
     for (const m of messages) {
       if ((m.type === '0' || m.type === 0) && m.speech) {
@@ -619,150 +725,115 @@ async function parseDialogflow(zip, filename) {
         if (m.payload.quick_replies) quickReplies = m.payload.quick_replies.map(q => q.title || q.payload || '');
       }
     }
-
     const inputContexts  = (data.contexts || []).map(c => (typeof c === 'string' ? c : c.name || '').toLowerCase().trim()).filter(Boolean);
-    const outputContexts = (resp0.affectedContexts || []).map(c => ({ name: (c.name||'').toLowerCase().trim(), lifespan: c.lifespan ?? 1 })).filter(c => c.name);
-    const params         = (resp0.parameters || []).map(p => ({ name: p.name, type: p.dataType || '', required: !!p.required, prompts: p.prompts || [] }));
-
+    const outputContexts = (resp0.affectedContexts || []).map(c => ({ name:(c.name||'').toLowerCase().trim(), lifespan:c.lifespan??1 })).filter(c=>c.name);
+    const params         = (resp0.parameters || []).map(p => ({ name:p.name, type:p.dataType||'', required:!!p.required, prompts:p.prompts||[] }));
     const isFallback = !!data.fallbackIntent;
-    const isWelcome  = !isFallback && (data.events||[]).some(e => e.name === 'WELCOME');
+    const isWelcome  = !isFallback && (data.events||[]).some(e=>e.name==='WELCOME');
     const isTerminal = !isFallback && (
-      outputContexts.some(c => /\bend\b|done|finish|complete|close|bye/i.test(c.name)) ||
+      outputContexts.some(c=>/\bend\b|done|finish|complete|close|bye/i.test(c.name)) ||
       /(_end|_done|_complete)\s*$/i.test(baseName)
     );
-
     let type = 'main';
-    if      (isWelcome)                          type = 'entry';
-    else if (isFallback && inputContexts.length === 0) type = 'global_fallback';
-    else if (isFallback)                         type = 'fallback';
-    else if (isTerminal)                         type = 'terminal';
-    else if (params.length > 0)                  type = 'data';
-
-    const trainingPhrases = (userSaysMap[baseName] || []).map(u =>
-      (u.data || []).map(d => d.text || '').join('').toLowerCase().trim()
-    ).filter(Boolean);
-
+    if      (isWelcome)  type = 'entry';
+    else if (isFallback && inputContexts.length===0) type = 'global_fallback';
+    else if (isFallback) type = 'fallback';
+    else if (isTerminal) type = 'terminal';
+    else if (params.length>0) type = 'data';
     return {
-      id: data.id || fname,
-      name: data.name || baseName,
-      type, label: makeLabel(data.name || baseName),
+      id: data.id||fname, name: data.name||baseName,
+      type, label: makeLabel(data.name||baseName),
       inputContexts, outputContexts, params,
       responseText, allSpeeches, quickReplies,
       isFallback, isWelcome, isTerminal,
-      parentId: data.parentId || null,
-      events: (data.events || []).map(e => e.name),
-      trainingPhrases,
+      parentId: data.parentId||null,
+      events: (data.events||[]).map(e=>e.name),
+      trainingPhrases: (userSaysMap[baseName]||[]).map(u=>(u.data||[]).map(d=>d.text||'').join('').toLowerCase().trim()).filter(Boolean),
     };
   });
 
-  // Build entities
-  const entities = Object.entries(entityDefFiles).map(([key, def]) => {
-    const entries = entityEntryMap[key] || [];
-    const kind = def.isRegexp ? 'Regexp' : def.isEnum ? 'Enum' : 'Synonym';
-    return { name: def.name || key, kind, entries };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  const entities = Object.entries(entityDefFiles).map(([key,def]) => ({
+    name: def.name||key,
+    kind: def.isRegexp?'Regexp':def.isEnum?'Enum':'Synonym',
+    entries: entityEntryMap[key]||[],
+  })).sort((a,b)=>a.name.localeCompare(b.name));
 
   return { intents, entities, agentName };
 }
 
 function makeLabel(name) {
-  let s = name.replace(/^(ans_|que_|default_?)/gi, '')
-              .replace(/(_que_|-\s*fallback).*$/, '')
-              .replace(/[-_]/g, ' ').trim();
-  if (s) s = s[0].toUpperCase() + s.slice(1);
-  return s.length > 22 ? s.slice(0, 20) + '…' : (s || name.slice(0, 22));
+  let s = name.replace(/^(ans_|que_|default_?)/gi,'').replace(/(_que_|-\s*fallback).*$/,'').replace(/[-_]/g,' ').trim();
+  if (s) s = s[0].toUpperCase()+s.slice(1);
+  return s.length>22 ? s.slice(0,20)+'…' : (s||name.slice(0,22));
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// Edge building
+// Agent rename
+// ══════════════════════════════════════════════════════════════════════
+function startRenameAgent() {
+  if (!editMode) return;
+  const pill=document.getElementById('agent-name'), input=document.getElementById('agent-name-input');
+  input.value=pill.textContent; pill.style.display='none'; input.style.display='block'; input.focus(); input.select();
+}
+function finishRenameAgent() {
+  const pill=document.getElementById('agent-name'), input=document.getElementById('agent-name-input');
+  const val=input.value.trim(); if (val) pill.textContent=val;
+  pill.style.display=''; input.style.display='none';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Graph building
 // ══════════════════════════════════════════════════════════════════════
 function buildEdges() {
-  allEdges = [];
-  const ctxToIntent = {};
-  for (const i of allIntents)
-    for (const oc of i.outputContexts) ctxToIntent[oc.name] = i.id;
-
+  allEdges=[];
+  const ctxToIntent={};
+  for (const i of allIntents) for (const oc of i.outputContexts) ctxToIntent[oc.name]=i.id;
   for (const intent of allIntents) {
-    const sources = new Map(); // srcId → context label
-    for (const ic of intent.inputContexts) {
-      const src = ctxToIntent[ic];
-      if (src && src !== intent.id && !sources.has(src)) sources.set(src, ic);
-    }
-    if (intent.parentId && !sources.has(intent.parentId)) sources.set(intent.parentId, '');
-    for (const [src, lbl] of sources)
-      allEdges.push({ from: src, to: intent.id, dashed: intent.isFallback, label: lbl });
+    const sources=new Map();
+    for (const ic of intent.inputContexts) { const src=ctxToIntent[ic]; if(src&&src!==intent.id&&!sources.has(src)) sources.set(src,ic); }
+    if (intent.parentId&&!sources.has(intent.parentId)) sources.set(intent.parentId,'');
+    for (const [src,lbl] of sources) allEdges.push({from:src,to:intent.id,dashed:intent.isFallback,label:lbl});
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Layout
-// ══════════════════════════════════════════════════════════════════════
 function computeLayout() {
-  const inDeg = {}, adj = {};
-  allIntents.forEach(i => { inDeg[i.id] = 0; adj[i.id] = []; });
-  allEdges.filter(e => !e.dashed).forEach(e => {
-    (adj[e.from] = adj[e.from] || []).push(e.to);
-    inDeg[e.to] = (inDeg[e.to] || 0) + 1;
-  });
-
-  const layer = {};
-  let q = allIntents.filter(i => (inDeg[i.id] || 0) === 0).map(i => i.id);
-  if (!q.length) q = allIntents.filter(i => i.type === 'entry').map(i => i.id);
-  if (!q.length && allIntents.length) q = [allIntents[0].id];
-  q.forEach(id => layer[id] = 0);
-
-  const toProc = [...q];
-  while (toProc.length) {
-    const id = toProc.shift();
-    for (const nxt of (adj[id] || [])) {
-      if (layer[nxt] === undefined || layer[nxt] <= layer[id]) {
-        layer[nxt] = layer[id] + 1;
-        toProc.push(nxt);
-      }
-    }
+  const inDeg={},adj={};
+  allIntents.forEach(i=>{inDeg[i.id]=0;adj[i.id]=[];});
+  allEdges.filter(e=>!e.dashed).forEach(e=>{(adj[e.from]=adj[e.from]||[]).push(e.to);inDeg[e.to]=(inDeg[e.to]||0)+1;});
+  const layer={};
+  let q=allIntents.filter(i=>(inDeg[i.id]||0)===0).map(i=>i.id);
+  if (!q.length) q=allIntents.filter(i=>i.type==='entry').map(i=>i.id);
+  if (!q.length&&allIntents.length) q=[allIntents[0].id];
+  q.forEach(id=>layer[id]=0);
+  const toProc=[...q];
+  while(toProc.length){const id=toProc.shift();for(const nxt of(adj[id]||[])){if(layer[nxt]===undefined||layer[nxt]<=layer[id]){layer[nxt]=layer[id]+1;toProc.push(nxt);}}}
+  allIntents.forEach(i=>{if(layer[i.id]===undefined)layer[i.id]=0;});
+  allIntents.filter(i=>i.isFallback).forEach(i=>{const pe=allEdges.find(e=>e.to===i.id&&!e.dashed)||allEdges.find(e=>e.to===i.id);if(pe)layer[i.id]=layer[pe.from]??0;});
+  const VGAP=110,PAD_Y=60,mainByL={},fbByL={};
+  allIntents.filter(i=>!i.isFallback).forEach(i=>{const l=layer[i.id];(mainByL[l]=mainByL[l]||[]).push(i);});
+  allIntents.filter(i=> i.isFallback).forEach(i=>{const l=layer[i.id];(fbByL[l] =fbByL[l] ||[]).push(i);});
+  const maxL=Math.max(0,...Object.keys(mainByL).map(Number));
+  positions={};
+  for(let l=0;l<=maxL;l++){
+    const mains=mainByL[l]||[],fbs=fbByL[l]||[],y=PAD_Y+l*VGAP;
+    mains.forEach((i,idx)=>{positions[i.id]={x:60+idx*(NODE_W+40),y};});
+    const fbX=60+Math.max(1,mains.length)*(NODE_W+40)+20;
+    fbs.forEach((i,idx)=>{positions[i.id]={x:fbX+idx*(NODE_W+18),y};});
   }
-  allIntents.forEach(i => { if (layer[i.id] === undefined) layer[i.id] = 0; });
-  allIntents.filter(i => i.isFallback).forEach(i => {
-    const pe = allEdges.find(e => e.to === i.id && !e.dashed) || allEdges.find(e => e.to === i.id);
-    if (pe) layer[i.id] = layer[pe.from] ?? 0;
-  });
-
-  const VGAP = 110, PAD_Y = 60;
-  const mainByL = {}, fbByL = {};
-  allIntents.filter(i => !i.isFallback).forEach(i => { const l = layer[i.id]; (mainByL[l] = mainByL[l] || []).push(i); });
-  allIntents.filter(i =>  i.isFallback).forEach(i => { const l = layer[i.id]; (fbByL[l]   = fbByL[l]   || []).push(i); });
-  const maxL = Math.max(0, ...Object.keys(mainByL).map(Number));
-
-  positions = {};
-  for (let l = 0; l <= maxL; l++) {
-    const mains = mainByL[l] || [];
-    const fbs   = fbByL[l]   || [];
-    const y = PAD_Y + l * VGAP;
-    mains.forEach((i, idx) => { positions[i.id] = { x: 60 + idx * (NODE_W + 40), y }; });
-    const fbX = 60 + Math.max(1, mains.length) * (NODE_W + 40) + 20;
-    fbs.forEach((i, idx)  => { positions[i.id] = { x: fbX + idx * (NODE_W + 18), y }; });
-  }
-  let yExtra = PAD_Y + (maxL + 1) * VGAP;
-  allIntents.forEach(i => { if (!positions[i.id]) { positions[i.id] = { x: 60, y: yExtra }; yExtra += VGAP; } });
-
-  let maxX = 0, maxY = 0;
-  Object.values(positions).forEach(p => {
-    maxX = Math.max(maxX, p.x + NODE_W + 60);
-    maxY = Math.max(maxY, p.y + NODE_H + 80);
-  });
-  canvasW = maxX; canvasH = maxY;
+  let yExtra=PAD_Y+(maxL+1)*VGAP;
+  allIntents.forEach(i=>{if(!positions[i.id]){positions[i.id]={x:60,y:yExtra};yExtra+=VGAP;}});
+  let maxX=0,maxY=0;
+  Object.values(positions).forEach(p=>{maxX=Math.max(maxX,p.x+NODE_W+60);maxY=Math.max(maxY,p.y+NODE_H+80);});
+  canvasW=maxX; canvasH=maxY;
 }
 
 // ══════════════════════════════════════════════════════════════════════
 // SVG rendering
 // ══════════════════════════════════════════════════════════════════════
 function renderGraph() {
-  svgEl.setAttribute('width', canvasW);
-  svgEl.setAttribute('height', canvasH);
-  svgEl.innerHTML = '';
-
-  const defs = mkS('defs');
-  defs.innerHTML = `
+  svgEl.setAttribute('width',canvasW); svgEl.setAttribute('height',canvasH); svgEl.innerHTML='';
+  const defs=mkS('defs');
+  defs.innerHTML=`
     <marker id="arrM" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="#7c6aff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
@@ -773,751 +844,524 @@ function renderGraph() {
       <path d="M2 1L8 5L2 9" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>`;
   svgEl.appendChild(defs);
-
   allEdges.forEach(drawEdge);
-  allIntents.forEach(i => drawNode(i));
+  allIntents.forEach(i=>drawNode(i));
   fitView();
 }
 
 function drawEdge(e) {
-  const fp = positions[e.from], tp = positions[e.to];
-  if (!fp || !tp) return;
-
-  const x1 = fp.x + NODE_W / 2, y1 = fp.y + NODE_H;
-  const x2 = tp.x + NODE_W / 2, y2 = tp.y;
-  const straight = Math.abs(x1 - x2) < 20;
-  const d = straight
-    ? `M${x1},${y1} L${x2},${y2}`
-    : `M${x1},${y1} C${x1},${y1+30} ${x2},${y2-30} ${x2},${y2}`;
-
-  const destIntent = allIntents.find(i => i.id === e.to);
-  const isGlobal   = destIntent && destIntent.type === 'global_fallback';
-  const stroke  = isGlobal ? '#ef4444' : e.dashed ? '#f59e0b' : '#7c6aff';
-  const markerId = isGlobal ? 'arrGF' : e.dashed ? 'arrF' : 'arrM';
-
-  const p = mkS('path');
-  p.setAttribute('d', d);
-  p.setAttribute('fill', 'none');
-  p.setAttribute('stroke', stroke);
-  p.setAttribute('stroke-width', '1.5');
-  p.setAttribute('stroke-opacity', e.dashed ? '0.35' : '0.45');
-  p.setAttribute('marker-end', `url(#${markerId})`);
-  if (e.dashed) p.setAttribute('stroke-dasharray', '5 4');
+  const fp=positions[e.from],tp=positions[e.to]; if(!fp||!tp) return;
+  const x1=fp.x+NODE_W/2,y1=fp.y+NODE_H,x2=tp.x+NODE_W/2,y2=tp.y;
+  const straight=Math.abs(x1-x2)<20;
+  const d=straight?`M${x1},${y1} L${x2},${y2}`:`M${x1},${y1} C${x1},${y1+30} ${x2},${y2-30} ${x2},${y2}`;
+  const dest=allIntents.find(i=>i.id===e.to);
+  const isGlobal=dest&&dest.type==='global_fallback';
+  const stroke=isGlobal?'#ef4444':e.dashed?'#f59e0b':'#7c6aff';
+  const mid=isGlobal?'arrGF':e.dashed?'arrF':'arrM';
+  const p=mkS('path'); p.setAttribute('d',d); p.setAttribute('fill','none'); p.setAttribute('stroke',stroke);
+  p.setAttribute('stroke-width','1.5'); p.setAttribute('stroke-opacity',e.dashed?'0.35':'0.45');
+  p.setAttribute('marker-end',`url(#${mid})`); if(e.dashed) p.setAttribute('stroke-dasharray','5 4');
   svgEl.appendChild(p);
-
-  // Context label on main-path curved edges
-  if (e.label && !e.dashed && !straight) {
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const lbl = e.label.length > 20 ? e.label.slice(0, 18) + '…' : e.label;
-    const tw = lbl.length * 5.4 + 10;
-
-    const bg = mkS('rect');
-    bg.setAttribute('x', mx - tw / 2); bg.setAttribute('y', my - 8);
-    bg.setAttribute('width', tw);      bg.setAttribute('height', 14);
-    bg.setAttribute('rx', '3');
-    bg.setAttribute('fill', '#0e0f11');
-    bg.setAttribute('opacity', '0.85');
-    svgEl.appendChild(bg);
-
-    const t = mkS('text');
-    t.setAttribute('x', mx); t.setAttribute('y', my);
-    t.setAttribute('text-anchor', 'middle');
-    t.setAttribute('dominant-baseline', 'central');
-    t.setAttribute('font-family', "'JetBrains Mono', monospace");
-    t.setAttribute('font-size', '9');
-    t.setAttribute('fill', '#555a70');
-    t.textContent = lbl;
-    svgEl.appendChild(t);
+  if(e.label&&!e.dashed&&!straight){
+    const mx=(x1+x2)/2,my=(y1+y2)/2,lbl=e.label.length>20?e.label.slice(0,18)+'…':e.label,tw=lbl.length*5.4+10;
+    const bg=mkS('rect'); bg.setAttribute('x',mx-tw/2); bg.setAttribute('y',my-8); bg.setAttribute('width',tw); bg.setAttribute('height',14); bg.setAttribute('rx','3'); bg.setAttribute('fill','#0e0f11'); bg.setAttribute('opacity','0.85'); svgEl.appendChild(bg);
+    const t=mkS('text'); t.setAttribute('x',mx); t.setAttribute('y',my); t.setAttribute('text-anchor','middle'); t.setAttribute('dominant-baseline','central'); t.setAttribute('font-family',"'JetBrains Mono', monospace"); t.setAttribute('font-size','9'); t.setAttribute('fill','#555a70'); t.textContent=lbl; svgEl.appendChild(t);
   }
 }
 
 function drawNode(intent) {
-  const pos = positions[intent.id];
-  if (!pos) return;
-  const { x, y } = pos;
-  const c = COLORS[intent.type] || COLORS.main;
-  const g = mkS('g');
-  g.setAttribute('cursor', 'pointer');
-  g.dataset.id = intent.id;
-
-  // Drop shadow
-  const sh = mkS('rect');
-  sh.setAttribute('x', x+2); sh.setAttribute('y', y+3);
-  sh.setAttribute('width', NODE_W); sh.setAttribute('height', NODE_H);
-  sh.setAttribute('rx', '10');
-  sh.setAttribute('fill', c.stroke); sh.setAttribute('opacity', '0.1');
-  g.appendChild(sh);
-
-  // Body
-  const rect = mkS('rect');
-  rect.setAttribute('x', x); rect.setAttribute('y', y);
-  rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
-  rect.setAttribute('rx', '10');
-  rect.setAttribute('fill', c.fill);
-  rect.setAttribute('stroke', c.stroke);
-  rect.setAttribute('stroke-width', '1.2');
-  rect.classList.add('node-rect');
-  g.appendChild(rect);
-
-  // Pulse ring (active chat indicator)
-  const pulse = mkS('rect');
-  pulse.setAttribute('x', x-4); pulse.setAttribute('y', y-4);
-  pulse.setAttribute('width', NODE_W+8); pulse.setAttribute('height', NODE_H+8);
-  pulse.setAttribute('rx', '14');
-  pulse.setAttribute('fill', 'none');
-  pulse.setAttribute('stroke', c.stroke);
-  pulse.setAttribute('stroke-width', '2');
-  pulse.setAttribute('opacity', '0');
-  pulse.classList.add('pulse-ring');
-  g.appendChild(pulse);
-
-  // Left accent bar
-  const bar = mkS('rect');
-  bar.setAttribute('x', x); bar.setAttribute('y', y+12);
-  bar.setAttribute('width', '3'); bar.setAttribute('height', NODE_H-24);
-  bar.setAttribute('rx', '1.5'); bar.setAttribute('fill', c.stroke);
-  g.appendChild(bar);
-
-  // Type icon
-  const icons = { entry:'🏠', data:'📋', main:'❓', fallback:'⚠️', global_fallback:'🚫', terminal:'✅' };
-  const icon = mkS('text');
-  icon.setAttribute('x', x + 14); icon.setAttribute('y', y + NODE_H / 2);
-  icon.setAttribute('dominant-baseline', 'central');
-  icon.setAttribute('font-size', '13');
-  icon.textContent = icons[intent.type] || '❓';
-  g.appendChild(icon);
-
-  // Label
-  const t1 = mkST(x + NODE_W / 2 + 6, y + NODE_H / 2 - 9, intent.label, '12', '600', c.text, 'Syne, sans-serif');
-  g.appendChild(t1);
-
-  // Sub-label (raw intent name)
-  const sub = intent.name.length > 28 ? intent.name.slice(0, 26) + '…' : intent.name;
-  const t2  = mkST(x + NODE_W / 2 + 6, y + NODE_H / 2 + 10, sub, '9', '400', c.sub, "'JetBrains Mono', monospace");
-  g.appendChild(t2);
-
-  g.addEventListener('click', ev => { ev.stopPropagation(); showDetail(intent.id); highlightNode(intent.id, false); });
-  g.addEventListener('mouseenter', () => { if (intent.id !== selectedNodeId) rect.setAttribute('stroke-width', '2'); });
-  g.addEventListener('mouseleave', () => { if (intent.id !== selectedNodeId) rect.setAttribute('stroke-width', '1.2'); });
+  const pos=positions[intent.id]; if(!pos) return;
+  const {x,y}=pos,c=COLORS[intent.type]||COLORS.main;
+  const g=mkS('g'); g.setAttribute('cursor','pointer'); g.dataset.id=intent.id;
+  const sh=mkS('rect'); sh.setAttribute('x',x+2); sh.setAttribute('y',y+3); sh.setAttribute('width',NODE_W); sh.setAttribute('height',NODE_H); sh.setAttribute('rx','10'); sh.setAttribute('fill',c.stroke); sh.setAttribute('opacity','0.1'); g.appendChild(sh);
+  const rect=mkS('rect'); rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',NODE_W); rect.setAttribute('height',NODE_H); rect.setAttribute('rx','10'); rect.setAttribute('fill',c.fill); rect.setAttribute('stroke',c.stroke); rect.setAttribute('stroke-width','1.2'); rect.classList.add('node-rect'); g.appendChild(rect);
+  const pulse=mkS('rect'); pulse.setAttribute('x',x-4); pulse.setAttribute('y',y-4); pulse.setAttribute('width',NODE_W+8); pulse.setAttribute('height',NODE_H+8); pulse.setAttribute('rx','14'); pulse.setAttribute('fill','none'); pulse.setAttribute('stroke',c.stroke); pulse.setAttribute('stroke-width','2'); pulse.setAttribute('opacity','0'); pulse.classList.add('pulse-ring'); g.appendChild(pulse);
+  const bar=mkS('rect'); bar.setAttribute('x',x); bar.setAttribute('y',y+12); bar.setAttribute('width','3'); bar.setAttribute('height',NODE_H-24); bar.setAttribute('rx','1.5'); bar.setAttribute('fill',c.stroke); g.appendChild(bar);
+  const icons={entry:'🏠',data:'📋',main:'❓',fallback:'⚠️',global_fallback:'🚫',terminal:'✅'};
+  const icon=mkS('text'); icon.setAttribute('x',x+14); icon.setAttribute('y',y+NODE_H/2); icon.setAttribute('dominant-baseline','central'); icon.setAttribute('font-size','13'); icon.textContent=icons[intent.type]||'❓'; g.appendChild(icon);
+  g.appendChild(mkST(x+NODE_W/2+6,y+NODE_H/2-9,intent.label,'12','600',c.text,'Syne, sans-serif'));
+  const sub=intent.name.length>28?intent.name.slice(0,26)+'…':intent.name;
+  g.appendChild(mkST(x+NODE_W/2+6,y+NODE_H/2+10,sub,'9','400',c.sub,"'JetBrains Mono', monospace"));
+  g.addEventListener('click',ev=>{ev.stopPropagation();if(editMode)showEditPanel(intent.id);else showDetail(intent.id);highlightNode(intent.id,false);});
+  g.addEventListener('mouseenter',()=>{if(intent.id!==selectedNodeId)rect.setAttribute('stroke-width','2');});
+  g.addEventListener('mouseleave',()=>{if(intent.id!==selectedNodeId)rect.setAttribute('stroke-width','1.2');});
   svgEl.appendChild(g);
 }
 
-function mkS(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
-function mkST(x, y, text, size, weight, fill, ff) {
-  const t = mkS('text');
-  t.setAttribute('x', x); t.setAttribute('y', y);
-  t.setAttribute('text-anchor', 'middle');
-  t.setAttribute('dominant-baseline', 'central');
-  t.setAttribute('font-family', ff || 'Syne, sans-serif');
-  t.setAttribute('font-size', size);
-  t.setAttribute('font-weight', weight);
-  t.setAttribute('fill', fill);
-  t.textContent = text;
-  return t;
+function mkS(tag){return document.createElementNS('http://www.w3.org/2000/svg',tag);}
+function mkST(x,y,text,size,weight,fill,ff){
+  const t=mkS('text');t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','central');
+  t.setAttribute('font-family',ff||'Syne, sans-serif');t.setAttribute('font-size',size);t.setAttribute('font-weight',weight);t.setAttribute('fill',fill);t.textContent=text;return t;
+}
+
+function highlightNode(id,panTo){
+  svgEl.querySelectorAll('.node-rect').forEach(r=>r.setAttribute('stroke-width','1.2'));
+  svgEl.querySelectorAll('.pulse-ring').forEach(r=>{r.setAttribute('opacity','0');r.style.animation='';r.removeAttribute('data-active');});
+  selectedNodeId=id;
+  const g=svgEl.querySelector(`g[data-id="${CSS.escape(id)}"]`);if(!g)return;
+  const rect=g.querySelector('.node-rect'),pulse=g.querySelector('.pulse-ring');
+  if(rect)rect.setAttribute('stroke-width','2.5');
+  if(pulse){pulse.setAttribute('data-active',id);pulse.setAttribute('opacity','1');pulse.style.animation='none';void pulse.offsetWidth;pulse.style.animation='pulse-ring 0.7s ease-out';pulse.addEventListener('animationend',()=>{if(pulse.getAttribute('data-active')===id){pulse.setAttribute('stroke','#ff6b6b');pulse.style.animation='active-glow 2s ease-in-out infinite';}},{once:true});}
+  if(panTo!==false&&positions[id]){const pos=positions[id],ww=wrap.offsetWidth,wh=wrap.offsetHeight;panX=ww/2-(pos.x+NODE_W/2)*scale;panY=wh/2-(pos.y+NODE_H/2)*scale;applyTransform();}
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// Node highlight
-// ══════════════════════════════════════════════════════════════════════
-function highlightNode(id, panTo) {
-  svgEl.querySelectorAll('.node-rect').forEach(r => r.setAttribute('stroke-width', '1.2'));
-  svgEl.querySelectorAll('.pulse-ring').forEach(r => {
-    r.setAttribute('opacity', '0');
-    r.style.animation = '';
-    r.removeAttribute('data-active');
-  });
-  selectedNodeId = id;
-
-  const g = svgEl.querySelector(`g[data-id="${CSS.escape(id)}"]`);
-  if (!g) return;
-  const rect  = g.querySelector('.node-rect');
-  const pulse = g.querySelector('.pulse-ring');
-  if (rect) rect.setAttribute('stroke-width', '2.5');
-  if (pulse) {
-    pulse.setAttribute('data-active', id);
-    pulse.setAttribute('opacity', '1');
-    pulse.style.animation = 'none';
-    void pulse.offsetWidth;
-    pulse.style.animation = 'pulse-ring 0.7s ease-out';
-    pulse.addEventListener('animationend', () => {
-      if (pulse.getAttribute('data-active') === id) {
-        pulse.setAttribute('stroke', '#ff6b6b');
-        pulse.style.animation = 'active-glow 2s ease-in-out infinite';
-      }
-    }, { once: true });
-  }
-
-  if (panTo !== false && positions[id]) {
-    const pos = positions[id];
-    const ww  = wrap.offsetWidth, wh = wrap.offsetHeight;
-    panX = ww / 2 - (pos.x + NODE_W / 2) * scale;
-    panY = wh / 2 - (pos.y + NODE_H / 2) * scale;
-    applyTransform();
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// Intent Detail Panel
+// View Detail Panel
 // ══════════════════════════════════════════════════════════════════════
 function showDetail(id) {
-  const intent = allIntents.find(i => i.id === id);
-  if (!intent) return;
-
-  closeEntities(); // only one panel open at a time
-
-  const tag  = document.getElementById('detail-tag');
-  const body = document.getElementById('detail-body');
-
-  tag.textContent = intent.type.replace('_', ' ');
-  tag.className   = `panel-tag tag-${intent.type}`;
-
-  let html = '';
-
-  // Response text
-  html += sec('Response', `<div class="detail-value">${esc(intent.responseText || '(no response defined)')}</div>`);
-
-  // Quick replies
-  if (intent.quickReplies.length) {
-    html += sec('Quick Replies', intent.quickReplies.map(q => `<span class="qr-chip">${esc(q)}</span>`).join(''));
+  const intent=allIntents.find(i=>i.id===id); if(!intent) return;
+  closeEntities();
+  document.getElementById('panel-detail-title').textContent='Intent Detail';
+  const tag=document.getElementById('detail-tag');
+  tag.textContent=intent.type.replace('_',' '); tag.className=`panel-tag tag-${intent.type}`;
+  let html='';
+  html+=sec('Response',`<div class="detail-value">${esc(intent.responseText||'(no response defined)')}</div>`);
+  if(intent.quickReplies.length)    html+=sec('Quick Replies',intent.quickReplies.map(q=>`<span class="qr-chip">${esc(q)}</span>`).join(''));
+  if(intent.inputContexts.length)   html+=sec('Input Contexts',intent.inputContexts.map(c=>`<span class="ctx-chip">${esc(c)}</span>`).join(''));
+  if(intent.outputContexts.length)  html+=sec('Output Contexts',intent.outputContexts.map(c=>`<span class="ctx-chip out">${esc(c.name)} <span style="opacity:0.55">×${c.lifespan}</span></span>`).join(''));
+  if(intent.params&&intent.params.length) html+=sec('Parameters',`<table class="param-table"><thead><tr><th>Name</th><th>Type</th><th>Req</th></tr></thead><tbody>${intent.params.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td style="text-align:center">${p.required?'✓':''}</td></tr>`).join('')}</tbody></table>`);
+  if(intent.events&&intent.events.length) html+=sec('Events',intent.events.map(e=>`<span class="ctx-chip">${esc(e)}</span>`).join(''));
+  if(intent.trainingPhrases.length){
+    const shown=intent.trainingPhrases.slice(0,12),more=intent.trainingPhrases.length-shown.length;
+    html+=sec(`Training Phrases (${shown.length}${more?' of '+intent.trainingPhrases.length:''})`,
+      `<div class="phrase-list">${shown.map(p=>`<div class="phrase-item">${esc(p)}</div>`).join('')}</div>`+(more?`<div style="font-size:10px;color:var(--text3);margin-top:4px">+${more} more</div>`:''));
   }
-
-  // Input contexts
-  if (intent.inputContexts.length) {
-    html += sec('Input Contexts', intent.inputContexts.map(c => `<span class="ctx-chip">${esc(c)}</span>`).join(''));
-  }
-
-  // Output contexts
-  if (intent.outputContexts.length) {
-    html += sec('Output Contexts', intent.outputContexts.map(c =>
-      `<span class="ctx-chip out">${esc(c.name)} <span style="opacity:0.55">×${c.lifespan}</span></span>`
-    ).join(''));
-  }
-
-  // Parameters
-  if (intent.params.length) {
-    const rows = intent.params.map(p =>
-      `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td style="text-align:center">${p.required ? '✓' : ''}</td></tr>`
-    ).join('');
-    html += sec('Parameters', `
-      <table class="param-table">
-        <thead><tr><th>Name</th><th>Type</th><th>Req</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`);
-  }
-
-  // Events
-  if (intent.events.length) {
-    html += sec('Events', intent.events.map(e => `<span class="ctx-chip">${esc(e)}</span>`).join(''));
-  }
-
-  // Training phrases
-  if (intent.trainingPhrases.length) {
-    const shown = intent.trainingPhrases.slice(0, 12);
-    const more  = intent.trainingPhrases.length - shown.length;
-    html += sec(
-      `Training Phrases (${shown.length}${more ? ' of ' + intent.trainingPhrases.length : ''})`,
-      `<div class="phrase-list">${shown.map(p => `<div class="phrase-item">${esc(p)}</div>`).join('')}</div>` +
-      (more ? `<div style="font-size:10px;color:var(--text3);margin-top:4px">+${more} more</div>` : '')
-    );
-  }
-
-  // Raw name
-  html += sec('Intent Name', `<div class="detail-value mono" style="font-size:10px;color:var(--text3);word-break:break-all">${esc(intent.name)}</div>`);
-
-  body.innerHTML = html;
+  html+=sec('Intent Name',`<div class="detail-value mono" style="font-size:10px;color:var(--text3);word-break:break-all">${esc(intent.name)}</div>`);
+  document.getElementById('detail-body').innerHTML=html;
   document.getElementById('panel-detail').classList.add('open');
 }
 
-function sec(label, content) {
-  return `<div class="detail-section"><div class="detail-label">${label}</div>${content}</div>`;
-}
+function sec(label,content){return `<div class="detail-section"><div class="detail-label">${label}</div>${content}</div>`;}
 
-function closeDetail() {
+function closeDetail(){
   document.getElementById('panel-detail').classList.remove('open');
-  if (!currentIntentId) {
-    svgEl.querySelectorAll('.node-rect').forEach(r => r.setAttribute('stroke-width', '1.2'));
-    svgEl.querySelectorAll('.pulse-ring').forEach(r => { r.setAttribute('opacity', '0'); r.style.animation = ''; });
-    selectedNodeId = null;
-  }
+  if(!currentIntentId){svgEl.querySelectorAll('.node-rect').forEach(r=>r.setAttribute('stroke-width','1.2'));svgEl.querySelectorAll('.pulse-ring').forEach(r=>{r.setAttribute('opacity','0');r.style.animation='';});selectedNodeId=null;}
 }
 
-// Click canvas background to close detail panel
-wrap.addEventListener('click', e => {
-  if (!mouseMoved && !e.target.closest('g[data-id]')) closeDetail();
-});
+wrap.addEventListener('click',e=>{if(!mouseMoved&&!e.target.closest('g[data-id]'))closeDetail();});
+
+// ══════════════════════════════════════════════════════════════════════
+// Edit Mode
+// ══════════════════════════════════════════════════════════════════════
+function toggleEditMode(){
+  editMode=!editMode;
+  const btn=document.getElementById('edit-mode-btn'),ind=document.getElementById('edit-indicator'),ni=document.getElementById('new-intent-btn');
+  btn.textContent=editMode?'✏ Editing':'✏ Edit';
+  btn.classList.toggle('edit-active',editMode);
+  ind.classList.toggle('visible',editMode);
+  ni.style.display=editMode?'':'none';
+  wrap.classList.toggle('edit-cursor',editMode);
+  closeDetail();
+  setStatus(editMode?'Edit mode — click a node to edit · ＋ Intent to create · ↓ Export ZIP when ready':'View mode');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Edit Panel
+// ══════════════════════════════════════════════════════════════════════
+function showEditPanel(id){
+  const intent=allIntents.find(i=>i.id===id); if(!intent) return;
+  editDraft=JSON.parse(JSON.stringify(intent));
+  closeEntities();
+  document.getElementById('panel-detail-title').textContent='Edit Intent';
+  const tag=document.getElementById('detail-tag');
+  tag.textContent='editing'; tag.className='panel-tag tag-editing';
+  const body=document.getElementById('detail-body');
+  body.innerHTML=renderEditForm(editDraft);
+  const ocList=document.getElementById('ef-oc-list');
+  editDraft.outputContexts.forEach(c=>ocList.appendChild(buildOcRow(c.name,c.lifespan)));
+  document.getElementById('panel-detail').classList.add('open');
+}
+
+function renderEditForm(draft){
+  const typeOpts=['entry','data','main','fallback','global_fallback','terminal']
+    .map(t=>`<option value="${t}"${draft.type===t?' selected':''}>${t.replace('_',' ')}</option>`).join('');
+  return `
+    <div class="detail-section">
+      <div class="detail-label">Intent Name</div>
+      <input class="edit-field" id="ef-name" value="${esc(draft.name)}" style="resize:none" placeholder="intent-name">
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Type</div>
+      <select class="edit-field" id="ef-type">${typeOpts}</select>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Bot Response</div>
+      <textarea class="edit-field" id="ef-response" rows="3" placeholder="What the bot says…">${esc(draft.responseText)}</textarea>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Quick Replies</div>
+      <div class="chip-editor" id="ef-ce-qr">
+        ${(draft.quickReplies||[]).map(q=>chipHtml(q)).join('')}
+        <input class="chip-input" placeholder="Add reply, Enter…" onkeydown="chipKeydown(event,'ef-ce-qr')">
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Input Contexts</div>
+      <div class="chip-editor" id="ef-ce-ic">
+        ${(draft.inputContexts||[]).map(c=>chipHtml(c)).join('')}
+        <input class="chip-input" placeholder="context-name, Enter…" onkeydown="chipKeydown(event,'ef-ce-ic')">
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Output Contexts</div>
+      <div id="ef-oc-list"></div>
+      <div class="chip-add-row">
+        <input class="edit-field" id="ef-oc-name" placeholder="context-name" style="flex:1">
+        <input class="edit-field" id="ef-oc-life" type="number" value="5" min="1" max="99" style="width:56px" title="Lifespan">
+        <button class="btn" style="padding:4px 9px;font-size:12px" onclick="efAddOcRow()">＋</button>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Training Phrases (one per line)</div>
+      <textarea class="edit-field" id="ef-phrases" rows="5" placeholder="yes\nthat's correct\nsounds good">${(draft.trainingPhrases||[]).map(p=>esc(p)).join('\n')}</textarea>
+    </div>
+    <div class="edit-actions">
+      <button class="btn primary" onclick="saveIntent()">Save</button>
+      <button class="btn" onclick="closeDetail()">Cancel</button>
+      <button class="btn danger" style="margin-left:auto" onclick="deleteIntent('${esc(draft.id)}')">Delete</button>
+    </div>`;
+}
+
+function chipHtml(value){return `<span class="chip-item"><span>${esc(value)}</span><button class="chip-del" onclick="this.closest('.chip-item').remove()" title="Remove">×</button></span>`;}
+
+function chipKeydown(e,editorId){
+  if(e.key!=='Enter'&&e.key!==',')return; e.preventDefault();
+  const inp=e.target,val=inp.value.trim().replace(/,$/,'').toLowerCase(); if(!val)return;
+  inp.insertAdjacentHTML('beforebegin',chipHtml(val)); inp.value='';
+}
+
+function getChips(editorId){
+  return [...document.querySelectorAll(`#${editorId} .chip-item span:first-child`)].map(el=>el.textContent.trim());
+}
+
+function buildOcRow(name,lifespan){
+  const div=document.createElement('div'); div.className='oc-row';
+  div.innerHTML=`<input class="edit-field oc-name" value="${esc(name)}" style="flex:1" placeholder="context-name"><input class="edit-field oc-life" type="number" value="${lifespan}" min="1" max="99" style="width:56px" title="Lifespan"><button class="oc-del" onclick="this.closest('.oc-row').remove()">×</button>`;
+  return div;
+}
+
+function efAddOcRow(){
+  const name=document.getElementById('ef-oc-name').value.trim(); if(!name)return;
+  const life=parseInt(document.getElementById('ef-oc-life').value)||5;
+  document.getElementById('ef-oc-list').appendChild(buildOcRow(name,life));
+  document.getElementById('ef-oc-name').value='';
+}
+
+function getOutputContexts(listId){
+  return [...document.querySelectorAll(`#${listId} .oc-row`)].map(row=>({
+    name:row.querySelector('.oc-name').value.trim().toLowerCase(),
+    lifespan:parseInt(row.querySelector('.oc-life').value)||5,
+  })).filter(c=>c.name);
+}
+
+function saveIntent(){
+  const draft=editDraft;
+  draft.name=document.getElementById('ef-name').value.trim()||draft.name;
+  draft.type=document.getElementById('ef-type').value;
+  draft.label=makeLabel(draft.name);
+  draft.responseText=document.getElementById('ef-response').value.trim();
+  draft.allSpeeches=draft.responseText?[draft.responseText]:[];
+  draft.quickReplies=getChips('ef-ce-qr');
+  draft.inputContexts=getChips('ef-ce-ic').map(c=>c.toLowerCase());
+  draft.outputContexts=getOutputContexts('ef-oc-list');
+  draft.trainingPhrases=document.getElementById('ef-phrases').value.split('\n').map(l=>l.trim().toLowerCase()).filter(Boolean);
+  draft.isFallback=draft.type==='fallback'||draft.type==='global_fallback';
+  draft.isWelcome =draft.type==='entry';
+  draft.isTerminal=draft.type==='terminal';
+  draft.events    =draft.isWelcome?['WELCOME']:[];
+  const idx=allIntents.findIndex(i=>i.id===draft.id);
+  if(idx>=0) allIntents[idx]={...allIntents[idx],...draft};
+  buildEdges(); computeLayout(); renderGraph(); updateStats(); closeDetail();
+  setStatus(`Saved: ${draft.name}`);
+}
+
+function deleteIntent(id){
+  const intent=allIntents.find(i=>i.id===id); if(!intent) return;
+  if(!confirm(`Delete intent "${intent.name}"?\n\nThis cannot be undone.`)) return;
+  allIntents=allIntents.filter(i=>i.id!==id);
+  buildEdges(); computeLayout(); renderGraph(); updateStats(); closeDetail();
+  setStatus(`Deleted: ${intent.name}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// New Intent Modal
+// ══════════════════════════════════════════════════════════════════════
+function openNewIntentModal(){
+  document.getElementById('ni-name').value='';
+  document.getElementById('ni-type').value='main';
+  document.getElementById('ni-response').value='';
+  document.getElementById('ni-phrases').value='';
+  document.getElementById('ni-oc-list').innerHTML='';
+  ['ni-ce-qr','ni-ce-ic'].forEach(id=>{document.getElementById(id).querySelectorAll('.chip-item').forEach(c=>c.remove());});
+  document.getElementById('modal-new-intent').classList.add('open');
+  setTimeout(()=>document.getElementById('ni-name').focus(),100);
+}
+function closeNewIntentModal(){document.getElementById('modal-new-intent').classList.remove('open');}
+
+function niAddOcRow(){
+  const name=document.getElementById('ni-oc-name').value.trim(); if(!name)return;
+  const life=parseInt(document.getElementById('ni-oc-life').value)||5;
+  document.getElementById('ni-oc-list').appendChild(buildOcRow(name,life));
+  document.getElementById('ni-oc-name').value='';
+}
+
+function createIntentFromModal(){
+  const name=document.getElementById('ni-name').value.trim();
+  if(!name){document.getElementById('ni-name').focus();return;}
+  const type=document.getElementById('ni-type').value;
+  const responseText=document.getElementById('ni-response').value.trim();
+  const intent={
+    id:crypto.randomUUID(), name, type, label:makeLabel(name),
+    responseText, allSpeeches:responseText?[responseText]:[],
+    quickReplies:getChips('ni-ce-qr'),
+    inputContexts:getChips('ni-ce-ic').map(c=>c.toLowerCase()),
+    outputContexts:getOutputContexts('ni-oc-list'),
+    params:[], isFallback:type==='fallback'||type==='global_fallback',
+    isWelcome:type==='entry', isTerminal:type==='terminal',
+    parentId:null, events:type==='entry'?['WELCOME']:[],
+    trainingPhrases:document.getElementById('ni-phrases').value.split('\n').map(l=>l.trim().toLowerCase()).filter(Boolean),
+  };
+
+  if(!allIntents.length){
+    document.getElementById('drop-zone').classList.add('hidden');
+    document.getElementById('agent-name').textContent='new-agent';
+    document.getElementById('chat-input').disabled=false;
+    document.getElementById('send-btn').disabled  =false;
+    document.getElementById('chat-dot').classList.remove('off');
+    document.getElementById('xstate-btn').disabled     =false;
+    document.getElementById('export-zip-btn').disabled =false;
+  }
+
+  allIntents.push(intent);
+  buildEdges(); computeLayout(); renderGraph(); updateStats();
+  closeNewIntentModal();
+  setStatus(`Created: ${intent.name}`);
+  setTimeout(()=>highlightNode(intent.id,true),100);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Export ZIP — Dialogflow ES format
+// ══════════════════════════════════════════════════════════════════════
+async function exportZip(){
+  if(!allIntents.length) return;
+  const agentName=document.getElementById('agent-name').textContent.trim()||'exported-agent';
+  setStatus('Building ZIP…');
+  const zip=new JSZip();
+
+  zip.file('agent.json',JSON.stringify({
+    description:'',language:'en',shortDescription:'',examples:'',
+    displayName:agentName, uniqueId:crypto.randomUUID(),
+    isPrivate:true, mlMinConfidence:0.3,
+    onePlatformApiVersion:'v2', analyzeQueryTextSentiment:false,
+    enabledKnowledgeBaseNames:[], knowledgeServiceConfidenceAdjustment:-0.4,
+    dialogBuilderMode:false, baseActionPackagesUrl:'',
+  },null,2));
+
+  zip.file('package.json',JSON.stringify({version:'1.0.0'},null,2));
+
+  for(const intent of allIntents){
+    const messages=[];
+    if(intent.responseText) messages.push({type:0,lang:'en',speech:[intent.responseText]});
+    if(intent.quickReplies&&intent.quickReplies.length)
+      messages.push({type:4,lang:'en',payload:{quick_replies:intent.quickReplies.map(title=>({content_type:'text',title,payload:title}))}});
+
+    const intentJson={
+      id:intent.id, name:intent.name, auto:true,
+      contexts:intent.inputContexts,
+      responses:[{
+        resetContexts:false,
+        affectedContexts:intent.outputContexts.map(c=>({name:c.name,parameters:{},lifespan:c.lifespan})),
+        parameters:(intent.params||[]).map(p=>({id:crypto.randomUUID(),required:p.required,dataType:p.type,name:p.name,value:'$'+p.name,promptMessages:p.prompts||[],noMatchPromptMessages:[],noInputPromptMessages:[],outputDialogContexts:[],isList:false})),
+        messages, defaultResponsePlatforms:{}, speech:[],
+      }],
+      priority:500000, webhookUsed:false, webhookForSlotFilling:false,
+      fallbackIntent:intent.isFallback,
+      events:(intent.events||[]).map(name=>({name})),
+      conditionalResponses:[], condition:'', conditionalFollowupEvents:[],
+    };
+    zip.file(`intents/${intent.name}.json`,JSON.stringify(intentJson,null,2));
+
+    if(intent.trainingPhrases&&intent.trainingPhrases.length){
+      const usersays=intent.trainingPhrases.map(phrase=>({id:crypto.randomUUID(),data:[{text:phrase,userDefined:false}],isTemplate:false,count:0,updated:0}));
+      zip.file(`intents/${intent.name}_usersays_en.json`,JSON.stringify(usersays,null,2));
+    }
+  }
+
+  const blob=await zip.generateAsync({type:'blob'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`${agentName}.zip`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus(`Exported: ${agentName}.zip — ready to import into Dialogflow ES (Settings → Export and Import → Import from ZIP)`);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // Entities Panel
 // ══════════════════════════════════════════════════════════════════════
-function buildEntitiesPanel() {
-  const body = document.getElementById('entities-body');
-  if (!allEntities.length) {
-    body.innerHTML = '<div style="font-size:12px;color:var(--text3);text-align:center;padding:24px">No custom entities found in this agent.</div>';
-    return;
-  }
-
-  // Map entity names → intents that use them
-  const usageMap = {};
-  for (const intent of allIntents) {
-    for (const p of intent.params) {
-      const ref = (p.type || '').replace(/^@/, '').toLowerCase();
-      if (!usageMap[ref]) usageMap[ref] = [];
-      const lbl = intent.label || intent.name;
-      if (!usageMap[ref].includes(lbl)) usageMap[ref].push(lbl);
-    }
-  }
-
-  body.innerHTML = allEntities.map(e => {
-    const preview = e.entries.slice(0, 20).map(en =>
-      `<span class="ctx-chip" style="margin:1px 2px">${esc(en.value || en)}</span>`
-    ).join('');
-    const overflow = e.entries.length > 20
-      ? `<span style="font-size:10px;color:var(--text3)"> +${e.entries.length - 20} more</span>` : '';
-    const used = usageMap[e.name.toLowerCase()] || [];
-    const usageHtml = used.length
-      ? `<div class="entity-usage">Used by: ${esc(used.slice(0, 4).join(', '))}${used.length > 4 ? ' +' + (used.length - 4) + ' more' : ''}</div>`
-      : '';
-    return `<div class="entity-card">
-      <div><span class="entity-name">@${esc(e.name)}</span><span class="entity-type-badge">${esc(e.kind)}</span></div>
-      <div class="entity-entries">${preview}${overflow}</div>
-      ${usageHtml}
-    </div>`;
+function buildEntitiesPanel(){
+  const body=document.getElementById('entities-body');
+  if(!allEntities.length){body.innerHTML='<div style="font-size:12px;color:var(--text3);text-align:center;padding:24px">No custom entities found.</div>';return;}
+  const usageMap={};
+  for(const intent of allIntents) for(const p of (intent.params||[])){const ref=(p.type||'').replace(/^@/,'').toLowerCase();if(!usageMap[ref])usageMap[ref]=[];const lbl=intent.label||intent.name;if(!usageMap[ref].includes(lbl))usageMap[ref].push(lbl);}
+  body.innerHTML=allEntities.map(e=>{
+    const preview=e.entries.slice(0,20).map(en=>`<span class="ctx-chip" style="margin:1px 2px">${esc(en.value||en)}</span>`).join('');
+    const overflow=e.entries.length>20?`<span style="font-size:10px;color:var(--text3)"> +${e.entries.length-20} more</span>`:'';
+    const used=usageMap[e.name.toLowerCase()]||[];
+    const usageHtml=used.length?`<div class="entity-usage">Used by: ${esc(used.slice(0,4).join(', '))}${used.length>4?' +'+(used.length-4)+' more':''}</div>`:'';
+    return `<div class="entity-card"><div><span class="entity-name">@${esc(e.name)}</span><span class="entity-type-badge">${esc(e.kind)}</span></div><div class="entity-entries">${preview}${overflow}</div>${usageHtml}</div>`;
   }).join('');
 }
-
-function toggleEntities() {
-  const panel = document.getElementById('panel-entities');
-  if (panel.classList.contains('open')) {
-    closeEntities();
-  } else {
-    closeDetail();
-    panel.classList.add('open');
-    document.getElementById('toggle-entities-btn').classList.add('active-btn');
-  }
-}
-
-function closeEntities() {
-  document.getElementById('panel-entities').classList.remove('open');
-  document.getElementById('toggle-entities-btn').classList.remove('active-btn');
-}
+function toggleEntities(){const panel=document.getElementById('panel-entities');if(panel.classList.contains('open')){closeEntities();}else{closeDetail();panel.classList.add('open');document.getElementById('toggle-entities-btn').classList.add('active-btn');}}
+function closeEntities(){document.getElementById('panel-entities').classList.remove('open');document.getElementById('toggle-entities-btn').classList.remove('active-btn');}
 
 // ══════════════════════════════════════════════════════════════════════
 // Chat Simulator
 // ══════════════════════════════════════════════════════════════════════
-function toggleChat() {
-  const sim = document.getElementById('sim');
-  const btn = document.getElementById('toggle-sim-btn');
-  if (sim.classList.contains('open')) {
-    sim.classList.remove('open');
-    btn.classList.remove('active-btn');
-  } else {
-    sim.classList.add('open');
-    btn.classList.add('active-btn');
-  }
-}
+function toggleChat(){const sim=document.getElementById('sim'),btn=document.getElementById('toggle-sim-btn');if(sim.classList.contains('open')){sim.classList.remove('open');btn.classList.remove('active-btn');}else{sim.classList.add('open');btn.classList.add('active-btn');}}
 
-function resetChat() {
-  activeContexts  = new Set();
-  ctxLifespan     = {};
-  currentIntentId = null;
-  convEnded       = false;
-
-  document.getElementById('messages').innerHTML    = '';
-  document.getElementById('chat-input').disabled   = allIntents.length === 0;
-  document.getElementById('send-btn').disabled     = allIntents.length === 0;
+function resetChat(){
+  activeContexts=new Set();ctxLifespan={};currentIntentId=null;convEnded=false;
+  document.getElementById('messages').innerHTML='';
+  document.getElementById('chat-input').disabled=allIntents.length===0;
+  document.getElementById('send-btn').disabled  =allIntents.length===0;
   updateCtxBar();
-
-  svgEl.querySelectorAll('.node-rect').forEach(r => r.setAttribute('stroke-width', '1.2'));
-  svgEl.querySelectorAll('.pulse-ring').forEach(r => { r.setAttribute('opacity', '0'); r.style.animation = ''; });
-  selectedNodeId = null;
-
-  if (!allIntents.length) { sysMsg('Load a Dialogflow ZIP to start simulating.'); return; }
+  svgEl.querySelectorAll('.node-rect').forEach(r=>r.setAttribute('stroke-width','1.2'));
+  svgEl.querySelectorAll('.pulse-ring').forEach(r=>{r.setAttribute('opacity','0');r.style.animation='';});
+  selectedNodeId=null;
+  if(!allIntents.length){sysMsg('Load a Dialogflow ZIP to start simulating.');return;}
   sysMsg('Conversation reset. Triggering welcome…');
-  const welcome = allIntents.find(i => i.isWelcome);
-  if (welcome) setTimeout(() => respond(welcome), 350);
-  else sysMsg('No welcome intent found. Type anything to begin.');
+  const welcome=allIntents.find(i=>i.isWelcome);
+  if(welcome) setTimeout(()=>respond(welcome),350); else sysMsg('No welcome intent found. Type anything to begin.');
 }
 
-function sendMessage() {
-  if (convEnded) return;
-  const inp  = document.getElementById('chat-input');
-  const text = inp.value.trim();
-  if (!text) return;
-  inp.value = ''; inp.style.height = '';
-  userMsg(text);
-  const intent = matchIntent(text);
-  decrementCtx();
-  respond(intent, text);
+function sendMessage(){
+  if(convEnded)return;
+  const inp=document.getElementById('chat-input'),text=inp.value.trim();if(!text)return;
+  inp.value='';inp.style.height='';
+  userMsg(text);const intent=matchIntent(text);decrementCtx();respond(intent,text);
 }
+function quickReply(text){if(convEnded)return;userMsg(text);const intent=matchIntent(text);decrementCtx();respond(intent,text);}
 
-function quickReply(text) {
-  if (convEnded) return;
-  userMsg(text);
-  const intent = matchIntent(text);
-  decrementCtx();
-  respond(intent, text);
-}
-
-// ── Intent matching ─────────────────────────────────────────────────
-function matchIntent(userText) {
-  const lower = userText.toLowerCase().trim();
-  let best = null, bestScore = -Infinity;
-  let bestCtxGated = null, bestCtxScore = -Infinity;
-
-  for (const intent of allIntents) {
-    if (intent.isWelcome) continue;
-    if (intent.isFallback) continue;
-
-    const ctxOk = intent.inputContexts.every(ic => activeContexts.has(ic));
-    if (!ctxOk) continue;
-
-    let score = intent.inputContexts.length * 8; // specificity bonus
-
-    for (const phrase of intent.trainingPhrases) {
-      if (phrase === lower) { score += 100; break; }
+function matchIntent(userText){
+  const lower=userText.toLowerCase().trim();
+  let best=null,bestScore=-Infinity,bestCtxGated=null,bestCtxScore=-Infinity;
+  for(const intent of allIntents){
+    if(intent.isWelcome||intent.isFallback)continue;
+    const ctxOk=intent.inputContexts.every(ic=>activeContexts.has(ic));if(!ctxOk)continue;
+    let score=intent.inputContexts.length*8;
+    for(const phrase of intent.trainingPhrases){if(phrase===lower){score+=100;break;}}
+    for(const phrase of intent.trainingPhrases){
+      if(phrase.includes(lower)||lower.includes(phrase)){score+=50;continue;}
+      const uw=new Set(lower.split(/\s+/).filter(w=>w.length>2));
+      const pw=new Set(phrase.split(/\s+/).filter(w=>w.length>2));
+      const overlap=[...uw].filter(w=>pw.has(w)).length;if(overlap)score+=overlap*12;
     }
-    for (const phrase of intent.trainingPhrases) {
-      if (phrase.includes(lower) || lower.includes(phrase)) { score += 50; continue; }
-      const uw = new Set(lower.split(/\s+/).filter(w => w.length > 2));
-      const pw = new Set(phrase.split(/\s+/).filter(w => w.length > 2));
-      const overlap = [...uw].filter(w => pw.has(w)).length;
-      if (overlap) score += overlap * 12;
-    }
-
-    // Quick-reply boost
-    if (currentIntentId) {
-      const cur = allIntents.find(i => i.id === currentIntentId);
-      if (cur && cur.quickReplies.some(qr => qr.toLowerCase() === lower)) score += 80;
-    }
-
-    if (score > bestScore) { bestScore = score; best = intent; }
-    if (score > bestCtxScore) { bestCtxScore = score; bestCtxGated = intent; }
+    if(currentIntentId){const cur=allIntents.find(i=>i.id===currentIntentId);if(cur&&cur.quickReplies.some(qr=>qr.toLowerCase()===lower))score+=80;}
+    if(score>bestScore){bestScore=score;best=intent;}
+    if(score>bestCtxScore){bestCtxScore=score;bestCtxGated=intent;}
   }
-
-  if (bestScore >= 15) return best;
-  if (bestCtxGated) return bestCtxGated;
-
-  // Contextual fallback
-  return allIntents.filter(i => i.isFallback).find(i =>
-    i.inputContexts.length === 0 || i.inputContexts.every(ic => activeContexts.has(ic))
-  ) || null;
+  if(bestScore>=15)return best;
+  if(bestCtxGated)return bestCtxGated;
+  return allIntents.filter(i=>i.isFallback).find(i=>i.inputContexts.length===0||i.inputContexts.every(ic=>activeContexts.has(ic)))||null;
 }
 
-// ── Respond ─────────────────────────────────────────────────────────
-function respond(intent) {
-  if (!intent) {
-    botMsg("Sorry, I didn't understand that.", [], 'nomatch', null);
-    return;
-  }
-
-  for (const oc of intent.outputContexts) {
-    activeContexts.add(oc.name);
-    ctxLifespan[oc.name] = oc.lifespan;
-  }
-  currentIntentId = intent.id;
-  updateCtxBar();
-  highlightNode(intent.id, true);
-
-  let text = intent.responseText;
-  if (intent.allSpeeches && intent.allSpeeches.length > 1)
-    text = intent.allSpeeches[Math.floor(Math.random() * intent.allSpeeches.length)];
-
-  const tag = intent.isFallback ? 'fallback' : 'matched';
-  botMsg(text || '(no response defined)', intent.quickReplies, tag, intent.name);
-
-  // Parameter hints for data-collecting intents
-  const requiredParams = intent.params.filter(p => p.required);
-  if (requiredParams.length) {
-    sysMsg('Expects: ' + requiredParams.map(p => `${p.name} (${p.type || 'text'})`).join(', '));
-  }
-
-  if (intent.isTerminal) {
-    convEnded = true;
-    setTimeout(() => sysMsg('✓ Flow complete. Click ↺ Reset to start again.'), 300);
-    document.getElementById('chat-input').disabled = true;
-  }
+function respond(intent){
+  if(!intent){botMsg("Sorry, I didn't understand that.",[],`nomatch`,null);return;}
+  for(const oc of intent.outputContexts){activeContexts.add(oc.name);ctxLifespan[oc.name]=oc.lifespan;}
+  currentIntentId=intent.id;updateCtxBar();highlightNode(intent.id,true);
+  let text=intent.responseText;
+  if(intent.allSpeeches&&intent.allSpeeches.length>1)text=intent.allSpeeches[Math.floor(Math.random()*intent.allSpeeches.length)];
+  botMsg(text||'(no response defined)',intent.quickReplies,intent.isFallback?'fallback':'matched',intent.name);
+  const req=(intent.params||[]).filter(p=>p.required);
+  if(req.length)sysMsg('Expects: '+req.map(p=>`${p.name} (${p.type||'text'})`).join(', '));
+  if(intent.isTerminal){convEnded=true;setTimeout(()=>sysMsg('✓ Flow complete. Click ↺ Reset to start again.'),300);document.getElementById('chat-input').disabled=true;}
 }
 
-function decrementCtx() {
-  for (const ctx of [...activeContexts]) {
-    ctxLifespan[ctx] = (ctxLifespan[ctx] ?? 1) - 1;
-    if (ctxLifespan[ctx] <= 0) { activeContexts.delete(ctx); delete ctxLifespan[ctx]; }
-  }
+function decrementCtx(){for(const ctx of [...activeContexts]){ctxLifespan[ctx]=(ctxLifespan[ctx]??1)-1;if(ctxLifespan[ctx]<=0){activeContexts.delete(ctx);delete ctxLifespan[ctx];}}}
+function updateCtxBar(){const bar=document.getElementById('ctx-bar');bar.innerHTML=activeContexts.size?[...activeContexts].map(c=>`<span class="ctx-chip">${esc(c)}</span>`).join(''):'<span class="ctx-empty">no active contexts</span>';}
+
+const msgsEl=document.getElementById('messages');
+function userMsg(text){const d=document.createElement('div');d.className='msg user';d.innerHTML=`<div class="bubble">${esc(text)}</div>`;msgsEl.appendChild(d);scrollDown();}
+function botMsg(text,qrs,tagType,intentName){
+  const d=document.createElement('div');d.className='msg bot';
+  const tag=intentName?`<span class="itag ${tagType}">${esc(intentName)}</span>`:`<span class="itag nomatch">no match</span>`;
+  const qrHtml=qrs&&qrs.length?`<div class="qr-row">${qrs.map(q=>`<button class="qr-btn" data-qr="${esc(q)}" onclick="quickReply(this.dataset.qr)">${esc(q)}</button>`).join('')}</div>`:'';
+  d.innerHTML=`<div class="bubble">${esc(text)}</div>${qrHtml}<div class="msg-meta">${tag}</div>`;msgsEl.appendChild(d);scrollDown();
 }
+function sysMsg(text){const d=document.createElement('div');d.className='msg system';d.innerHTML=`<div class="bubble">${esc(text)}</div>`;msgsEl.appendChild(d);scrollDown();}
+function scrollDown(){msgsEl.scrollTop=msgsEl.scrollHeight;}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-function updateCtxBar() {
-  const bar = document.getElementById('ctx-bar');
-  bar.innerHTML = activeContexts.size
-    ? [...activeContexts].map(c => `<span class="ctx-chip">${esc(c)}</span>`).join('')
-    : '<span class="ctx-empty">no active contexts</span>';
-}
-
-// ── Message builders ──────────────────────────────────────────────
-const msgsEl = document.getElementById('messages');
-
-function userMsg(text) {
-  const d = document.createElement('div');
-  d.className = 'msg user';
-  d.innerHTML = `<div class="bubble">${esc(text)}</div>`;
-  msgsEl.appendChild(d); scrollDown();
-}
-
-function botMsg(text, qrs, tagType, intentName) {
-  const d = document.createElement('div');
-  d.className = 'msg bot';
-  const tag = intentName
-    ? `<span class="itag ${tagType}">${esc(intentName)}</span>`
-    : `<span class="itag nomatch">no match</span>`;
-  const qrHtml = qrs && qrs.length
-    ? `<div class="qr-row">${qrs.map(q => `<button class="qr-btn" data-qr="${esc(q)}" onclick="quickReply(this.dataset.qr)">${esc(q)}</button>`).join('')}</div>`
-    : '';
-  d.innerHTML = `<div class="bubble">${esc(text)}</div>${qrHtml}<div class="msg-meta">${tag}</div>`;
-  msgsEl.appendChild(d); scrollDown();
-}
-
-function sysMsg(text) {
-  const d = document.createElement('div');
-  d.className = 'msg system';
-  d.innerHTML = `<div class="bubble">${esc(text)}</div>`;
-  msgsEl.appendChild(d); scrollDown();
-}
-
-function scrollDown() { msgsEl.scrollTop = msgsEl.scrollHeight; }
-function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
-// ══════════════════════════════════════════════════════════════════════
-// Floating sim drag
-// ══════════════════════════════════════════════════════════════════════
-(function () {
-  const head = document.getElementById('sim-head');
-  const sim  = document.getElementById('sim');
-  let dragging = false, ox = 0, oy = 0;
-
-  head.addEventListener('mousedown', e => {
-    if (e.target.closest('.btn')) return;
-    dragging = true;
-    head.classList.add('grabbing');
-    const r = sim.getBoundingClientRect();
-    ox = e.clientX - r.left;
-    oy = e.clientY - r.top;
-    e.preventDefault();
-  });
-  window.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    let nx = e.clientX - ox;
-    let ny = e.clientY - oy;
-    nx = Math.max(0, Math.min(window.innerWidth  - sim.offsetWidth,  nx));
-    ny = Math.max(0, Math.min(window.innerHeight - sim.offsetHeight, ny));
-    sim.style.left   = nx + 'px';
-    sim.style.top    = ny + 'px';
-    sim.style.bottom = 'auto';
-  });
-  window.addEventListener('mouseup', () => {
-    dragging = false;
-    head.classList.remove('grabbing');
-  });
+// ── Sim drag ─────────────────────────────────────────────────────────
+(function(){
+  const head=document.getElementById('sim-head'),sim=document.getElementById('sim');
+  let dragging=false,ox=0,oy=0;
+  head.addEventListener('mousedown',e=>{if(e.target.closest('.btn'))return;dragging=true;head.classList.add('grabbing');const r=sim.getBoundingClientRect();ox=e.clientX-r.left;oy=e.clientY-r.top;e.preventDefault();});
+  window.addEventListener('mousemove',e=>{if(!dragging)return;let nx=e.clientX-ox,ny=e.clientY-oy;nx=Math.max(0,Math.min(window.innerWidth-sim.offsetWidth,nx));ny=Math.max(0,Math.min(window.innerHeight-sim.offsetHeight,ny));sim.style.left=nx+'px';sim.style.top=ny+'px';sim.style.bottom='auto';});
+  window.addEventListener('mouseup',()=>{dragging=false;head.classList.remove('grabbing');});
 })();
 
 // ══════════════════════════════════════════════════════════════════════
 // Pan / Zoom
 // ══════════════════════════════════════════════════════════════════════
-function applyTransform() { svgEl.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`; }
-function zoomBy(f) { scale = Math.max(0.2, Math.min(3, scale * f)); applyTransform(); }
-function fitView() {
-  if (!canvasW || !canvasH) return;
-  const ww = wrap.offsetWidth, wh = wrap.offsetHeight;
-  scale = Math.min(ww / canvasW, wh / canvasH, 1) * 0.9;
-  panX  = (ww - canvasW * scale) / 2;
-  panY  = 20;
-  applyTransform();
+function applyTransform(){svgEl.style.transform=`translate(${panX}px,${panY}px) scale(${scale})`;}
+function zoomBy(f){scale=Math.max(0.2,Math.min(3,scale*f));applyTransform();}
+function fitView(){if(!canvasW||!canvasH)return;const ww=wrap.offsetWidth,wh=wrap.offsetHeight;scale=Math.min(ww/canvasW,wh/canvasH,1)*0.9;panX=(ww-canvasW*scale)/2;panY=20;applyTransform();}
+
+wrap.addEventListener('mousedown',e=>{if(e.target.closest('g[data-id]'))return;isDragging=true;mouseMoved=false;wrap.classList.add('dragging');dragX=e.clientX;dragY=e.clientY;panX0=panX;panY0=panY;});
+window.addEventListener('mousemove',e=>{if(!isDragging)return;mouseMoved=true;panX=panX0+(e.clientX-dragX);panY=panY0+(e.clientY-dragY);applyTransform();});
+window.addEventListener('mouseup',()=>{isDragging=false;wrap.classList.remove('dragging');setTimeout(()=>{mouseMoved=false;},0);});
+wrap.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:0.91,r=wrap.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,ns=Math.max(0.2,Math.min(3,scale*f));panX=mx-(mx-panX)*(ns/scale);panY=my-(my-panY)*(ns/scale);scale=ns;applyTransform();},{passive:false});
+
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&f.name.endsWith('.zip'))handleFile(f);});
+
+// ── Stats / Status ────────────────────────────────────────────────────
+function updateStats(){
+  document.getElementById('s-intents').textContent  =allIntents.filter(i=>!i.isFallback).length;
+  document.getElementById('s-fallbacks').textContent=allIntents.filter(i=> i.isFallback).length;
+  const ctxs=new Set();
+  allIntents.forEach(i=>{i.inputContexts.forEach(c=>ctxs.add(c));i.outputContexts.forEach(c=>ctxs.add(c.name));});
+  document.getElementById('s-contexts').textContent=ctxs.size;
+  document.getElementById('s-edges').textContent   =allEdges.length;
+  document.getElementById('s-entities').textContent=allEntities.length;
 }
+function setStatus(m){document.getElementById('status-bar').textContent=m;}
 
-wrap.addEventListener('mousedown', e => {
-  if (e.target.closest('g[data-id]')) return;
-  isDragging = true; mouseMoved = false;
-  wrap.classList.add('dragging');
-  dragX = e.clientX; dragY = e.clientY;
-  panX0 = panX; panY0 = panY;
-});
-window.addEventListener('mousemove', e => {
-  if (!isDragging) return;
-  mouseMoved = true;
-  panX = panX0 + (e.clientX - dragX);
-  panY = panY0 + (e.clientY - dragY);
-  applyTransform();
-});
-window.addEventListener('mouseup', () => {
-  isDragging = false;
-  wrap.classList.remove('dragging');
-  setTimeout(() => { mouseMoved = false; }, 0);
-});
-wrap.addEventListener('wheel', e => {
-  e.preventDefault();
-  const f  = e.deltaY < 0 ? 1.1 : 0.91;
-  const r  = wrap.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const ns = Math.max(0.2, Math.min(3, scale * f));
-  panX = mx - (mx - panX) * (ns / scale);
-  panY = my - (my - panY) * (ns / scale);
-  scale = ns;
-  applyTransform();
-}, { passive: false });
+// ── Help ──────────────────────────────────────────────────────────────
+function openHelp(){document.getElementById('modal-help').classList.add('open');}
+function closeHelp(){document.getElementById('modal-help').classList.remove('open');}
 
-// Drag & drop file
-document.addEventListener('dragover', e => e.preventDefault());
-document.addEventListener('drop', e => {
-  e.preventDefault();
-  const f = e.dataTransfer.files[0];
-  if (f && f.name.endsWith('.zip')) handleFile(f);
-});
+// ── XState export ─────────────────────────────────────────────────────
+function toStateId(n){return n.replace(/^(ans_|que_|default_?)/gi,'').replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').toLowerCase()||'state_'+Math.random().toString(36).slice(2,7);}
+function sanitizeId(n){return n.replace(/[^a-zA-Z0-9]/g,'_').replace(/^[0-9]/,'_$&').replace(/_+/g,'_').replace(/^_|_$/g,'')||'agent';}
 
-// ── Stats + status ────────────────────────────────────────────────
-function updateStats() {
-  document.getElementById('s-intents').textContent   = allIntents.filter(i => !i.isFallback).length;
-  document.getElementById('s-fallbacks').textContent = allIntents.filter(i =>  i.isFallback).length;
-  const ctxs = new Set();
-  allIntents.forEach(i => {
-    i.inputContexts.forEach(c  => ctxs.add(c));
-    i.outputContexts.forEach(c => ctxs.add(c.name));
-  });
-  document.getElementById('s-contexts').textContent = ctxs.size;
-  document.getElementById('s-edges').textContent    = allEdges.length;
-  document.getElementById('s-entities').textContent = allEntities.length;
-}
-function setStatus(m) { document.getElementById('status-bar').textContent = m; }
-
-// ══════════════════════════════════════════════════════════════════════
-// Help Modal
-// ══════════════════════════════════════════════════════════════════════
-function openHelp()  { document.getElementById('modal-help').classList.add('open'); }
-function closeHelp() { document.getElementById('modal-help').classList.remove('open'); }
-
-// ══════════════════════════════════════════════════════════════════════
-// XState export
-// ══════════════════════════════════════════════════════════════════════
-function toStateId(name) {
-  return name
-    .replace(/^(ans_|que_|default_?)/gi, '')
-    .replace(/[^a-zA-Z0-9]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .toLowerCase() || 'state_' + Math.random().toString(36).slice(2, 7);
-}
-
-function generateXState() {
-  const agentName = document.getElementById('agent-name').textContent;
-
-  const stateIdMap = {}, used = {};
-  for (const intent of allIntents) {
-    let base = toStateId(intent.name);
-    if (used[base]) { let n = 2; while (used[base + '_' + n]) n++; base = base + '_' + n; }
-    used[base] = true;
-    stateIdMap[intent.id] = base;
-  }
-
-  const outgoing = {};
-  allIntents.forEach(i => { outgoing[i.id] = []; });
-
-  for (const intent of allIntents) {
-    if (intent.isFallback || intent.isWelcome) continue;
-    for (const ic of intent.inputContexts) {
-      const source = allIntents.find(s => s.outputContexts.some(oc => oc.name === ic));
-      if (source && source.id !== intent.id) {
-        const evtName = intent.name
-          .replace(/^(ans_)/gi, '')
-          .replace(/[^a-zA-Z0-9]/g, '_')
-          .replace(/_+/g, '_')
-          .replace(/^_|_$/g, '')
-          .toUpperCase();
-        if (!outgoing[source.id].find(t => t.eventName === evtName)) {
-          outgoing[source.id].push({ eventName: evtName, targetStateId: stateIdMap[intent.id] });
-        }
-      }
-    }
-  }
-
-  function fallbackFor(intent) {
-    return allIntents.find(fb =>
-      fb.isFallback && (
-        fb.inputContexts.length === 0 ||
-        fb.inputContexts.some(ic => intent.outputContexts.some(oc => oc.name === ic))
-      )
-    ) || allIntents.find(fb => fb.isFallback);
-  }
-
-  const lines = [];
-  lines.push(`import { createMachine, assign } from 'xstate';`);
-  lines.push(``);
-  lines.push(`/**`);
-  lines.push(` * XState machine generated from Dialogflow agent: ${agentName}`);
-  lines.push(` *`);
-  lines.push(` * Usage:`);
-  lines.push(` *   1. Run NLP on user input to get matched intent name`);
-  lines.push(` *   2. Send { type: 'INTENT_NAME' } to this machine`);
-  lines.push(` *   3. Read context.response + context.quickReplies to reply to user`);
-  lines.push(` */`);
-  lines.push(`const ${sanitizeId(agentName)}Machine = createMachine({`);
-  lines.push(`  id: '${sanitizeId(agentName)}',`);
-
-  const welcome = allIntents.find(i => i.isWelcome);
-  lines.push(`  initial: '${welcome ? stateIdMap[welcome.id] : stateIdMap[allIntents[0]?.id]}',`);
-  lines.push(`  context: {`);
-  lines.push(`    response: '',`);
-  lines.push(`    quickReplies: [],`);
-  lines.push(`  },`);
-  lines.push(`  states: {`);
-
-  for (const intent of allIntents) {
-    const sid = stateIdMap[intent.id];
-    lines.push(`    ${sid}: {`);
-    lines.push(`      entry: assign({`);
-    lines.push(`        response: () => ${JSON.stringify(intent.responseText || '')},`);
-    lines.push(`        quickReplies: () => ${JSON.stringify(intent.quickReplies)},`);
-    lines.push(`      }),`);
-    if (intent.isTerminal) lines.push(`      type: 'final',`);
-    if (intent.trainingPhrases.length) {
-      lines.push(`      // Triggers: ${intent.trainingPhrases.slice(0, 3).map(p => `"${p}"`).join(', ')}`);
-    }
-    const trans = outgoing[intent.id] || [];
-    const fb    = !intent.isTerminal ? fallbackFor(intent) : null;
-    if (trans.length || fb) {
-      lines.push(`      on: {`);
-      for (const t of trans) {
-        lines.push(`        ${t.eventName}: { target: '${t.targetStateId}' },`);
-      }
-      if (fb) lines.push(`        '*': { target: '${stateIdMap[fb.id]}' }, // no match → fallback`);
-      lines.push(`      },`);
-    }
+function generateXState(){
+  const agentName=document.getElementById('agent-name').textContent;
+  const stateIdMap={},used={};
+  for(const intent of allIntents){let base=toStateId(intent.name);if(used[base]){let n=2;while(used[base+'_'+n])n++;base=base+'_'+n;}used[base]=true;stateIdMap[intent.id]=base;}
+  const outgoing={};allIntents.forEach(i=>{outgoing[i.id]=[];});
+  for(const intent of allIntents){if(intent.isFallback||intent.isWelcome)continue;for(const ic of intent.inputContexts){const source=allIntents.find(s=>s.outputContexts.some(oc=>oc.name===ic));if(source&&source.id!==intent.id){const evtName=intent.name.replace(/^(ans_)/gi,'').replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').toUpperCase();if(!outgoing[source.id].find(t=>t.eventName===evtName))outgoing[source.id].push({eventName:evtName,targetStateId:stateIdMap[intent.id]});}}}
+  function fallbackFor(intent){return allIntents.find(fb=>fb.isFallback&&(fb.inputContexts.length===0||fb.inputContexts.some(ic=>intent.outputContexts.some(oc=>oc.name===ic))))||allIntents.find(fb=>fb.isFallback);}
+  const lines=[`import { createMachine, assign } from 'xstate';`,'',`const ${sanitizeId(agentName)}Machine = createMachine({`,`  id: '${sanitizeId(agentName)}',`];
+  const welcome=allIntents.find(i=>i.isWelcome);
+  lines.push(`  initial: '${welcome?stateIdMap[welcome.id]:stateIdMap[allIntents[0]?.id]}',`,`  context: { response: '', quickReplies: [] },`,'  states: {');
+  for(const intent of allIntents){
+    const sid=stateIdMap[intent.id];
+    lines.push(`    ${sid}: {`,`      entry: assign({ response: ()=>${JSON.stringify(intent.responseText||'')}, quickReplies: ()=>${JSON.stringify(intent.quickReplies||[])} }),`);
+    if(intent.isTerminal)lines.push(`      type: 'final',`);
+    if(intent.trainingPhrases&&intent.trainingPhrases.length)lines.push(`      // Triggers: ${intent.trainingPhrases.slice(0,3).map(p=>`"${p}"`).join(', ')}`);
+    const trans=outgoing[intent.id]||[],fb=!intent.isTerminal?fallbackFor(intent):null;
+    if(trans.length||fb){lines.push(`      on: {`);for(const t of trans)lines.push(`        ${t.eventName}: { target: '${t.targetStateId}' },`);if(fb)lines.push(`        '*': { target: '${stateIdMap[fb.id]}' },`);lines.push(`      },`);}
     lines.push(`    },`);
   }
-
-  lines.push(`  },`);
-  lines.push(`});`);
-  lines.push(``);
-  lines.push(`export default ${sanitizeId(agentName)}Machine;`);
+  lines.push(`  },`,'});','',`export default ${sanitizeId(agentName)}Machine;`);
   return lines.join('\n');
 }
 
-function sanitizeId(name) {
-  return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^[0-9]/, '_$&').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'agent';
-}
-
-function openXStateModal() {
-  if (!allIntents.length) return;
-  document.getElementById('xstate-code').textContent = generateXState();
-  document.getElementById('xstate-agent-label').textContent = document.getElementById('agent-name').textContent;
-  document.getElementById('copy-btn').textContent = 'Copy';
-  document.getElementById('xstate-modal').classList.add('open');
-}
-function closeXStateModal() { document.getElementById('xstate-modal').classList.remove('open'); }
-function copyXState() {
-  navigator.clipboard.writeText(document.getElementById('xstate-code').textContent).then(() => {
-    const btn = document.getElementById('copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-  });
-}
+function openXStateModal(){if(!allIntents.length)return;document.getElementById('xstate-code').textContent=generateXState();document.getElementById('xstate-agent-label').textContent=document.getElementById('agent-name').textContent;document.getElementById('copy-btn').textContent='Copy';document.getElementById('xstate-modal').classList.add('open');}
+function closeXStateModal(){document.getElementById('xstate-modal').classList.remove('open');}
+function copyXState(){navigator.clipboard.writeText(document.getElementById('xstate-code').textContent).then(()=>{const btn=document.getElementById('copy-btn');btn.textContent='Copied!';setTimeout(()=>{btn.textContent='Copy';},2000);});}
 </script>
 </body>
 </html>
